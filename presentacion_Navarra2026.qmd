@@ -149,7 +149,7 @@ df_h <- tibble(x = x, y = dnorm(x))
 \vspace{0.4em}
 \textcolor{accent}{\textbf{Materiales del curso}}
 
-\footnotesize\url{https://github.com/acabedo/conferences}
+\footnotesize\url{https://github.com/acabedo/navarra2026}
 
 \vspace{0.4em}
 \small\textcolor{darkblue}{\textbf{Seminario}} · Universidad de Navarra · 5 mayo 2026
@@ -338,7 +338,7 @@ ggplot(discursos, aes(x=reorder(discurso,anio), y=n_tokens, fill=orador)) +
   tl
 ```
 
-\footnotesize Textos disponibles en \url{https://github.com/acabedo/conferences}
+\footnotesize Textos disponibles en \url{https://github.com/acabedo/navarra2026}
 
 
 ## Riqueza léxica: tipos y tokens {shrink=5}
@@ -928,7 +928,7 @@ install.packages(c(
 
 \vspace{0.2em}
 \begin{exampleblock}{\small Materiales}
-\footnotesize\url{https://github.com/acabedo/conferences}
+\footnotesize\url{https://github.com/acabedo/navarra2026}
 \end{exampleblock}
 
 :::
@@ -2044,7 +2044,7 @@ resultado <- freq_tabla |>
   filter(LL >= 15.13) |> arrange(desc(abs(LR)))
 ```
 
-\footnotesize Archivo Excel en \url{https://github.com/acabedo/conferences}
+\footnotesize Archivo Excel en \url{https://github.com/acabedo/navarra2026}
 
 
 # Parte V: Aplicación integrada {.standout}
@@ -2362,7 +2362,7 @@ $\neq$
 
 \vspace{0.2em}
 \begin{exampleblock}{\small Materiales}
-\footnotesize\url{https://github.com/acabedo/conferences}
+\footnotesize\url{https://github.com/acabedo/navarra2026}
 \end{exampleblock}
 
 :::
@@ -2449,7 +2449,7 @@ Sketch Engine: \url{https://www.sketchengine.eu} · AntConc: \url{https://www.la
 \vspace{0.3em}
 \small\textbf{Materiales del seminario}
 
-\footnotesize\url{https://github.com/acabedo/conferences} — código R · corpus .txt · plantilla Excel · diapositivas
+\footnotesize\url{https://github.com/acabedo/navarra2026} — código R · corpus .txt · plantilla Excel · diapositivas
 
 
 ## Preguntas
@@ -2467,7 +2467,7 @@ Sketch Engine: \url{https://www.sketchengine.eu} · AntConc: \url{https://www.la
 \texttt{adrian.cabedo@uv.es}
 
 \vspace{0.4em}
-\small\url{https://github.com/acabedo/conferences}
+\small\url{https://github.com/acabedo/navarra2026}
 
 \vspace{0.8em}
 \textcolor{midblue}{\rule{0.6\textwidth}{0.4pt}}
