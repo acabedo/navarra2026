@@ -39,13 +39,12 @@ Los ejemplos parten de los **discursos de investidura de Rajoy (2011, 2016a, 201
 ## Estructura del repositorio
 
 ```
-├── docs/
-│   └── index.html              # Informe interactivo (GitHub Pages)
-├── textos/                     # Discursos de investidura en texto plano
-├── stats_corpus_v5.qmd         # Presentación principal (Quarto)
-├── stats_corpus_v5.pdf         # Presentación en PDF
-├── quanteda_plots_corpus.qmd   # Código de visualizaciones con quanteda
-└── quanteda_plots_corpus.pdf   # Visualizaciones en PDF
+├── index.html                       # Informe interactivo (GitHub Pages)
+├── informe_corpus.qmd               # Código del informe interactivo (Quarto)
+├── informe_corpus_files/            # Recursos generados por el informe
+├── presentacion_Navarra2026.qmd     # Presentación principal (Quarto)
+├── presentacion_Navarra2026.pdf     # Presentación en PDF
+└── textos/                          # Discursos de investidura en texto plano
 ```
 
 ---
