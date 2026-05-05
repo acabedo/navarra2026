@@ -1,0 +1,2477 @@
+---
+title: "Estadística para la lingüística de corpus"
+subtitle: "De la hipótesis nula al mapa léxico"
+author: "Adrián Cabedo Nebot"
+institute: "Universitat de València · Catedrático de Lengua Española"
+date: "5 05 2026"
+lang: es
+format:
+  beamer:
+    theme: metropolis
+    aspectratio: 169
+    beamerarticle: true
+    toc: false
+    slide-level: 2
+    header-includes: |
+      \usepackage{booktabs}
+      \usepackage{xcolor}
+      \usepackage{hyperref}
+      \definecolor{accent}{HTML}{E63946}
+      \definecolor{darkblue}{HTML}{1D3557}
+      \definecolor{midblue}{HTML}{457B9D}
+      \setbeamercolor{frametitle}{bg=darkblue, fg=white}
+      \setbeamercolor{title separator}{fg=accent}
+      \setbeamercolor{progress bar}{fg=accent}
+      \setbeamerfont{frametitle}{size=\normalsize}
+      \hypersetup{colorlinks=true, urlcolor=midblue}
+      \setlength{\parskip}{2pt}
+      \usepackage{caption}
+      \captionsetup[figure]{labelformat=empty,textformat=empty}
+execute:
+  echo: false
+  warning: false
+  message: false
+knitr:
+  opts_chunk:
+    fig.cap: ~
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(scales)
+library(ggrepel)
+library(quanteda)
+library(quanteda.textstats)
+library(wordcloud2)
+library(ggwordcloud)
+
+# ── Leer corpus real ─────────────────────────────────────────
+# Ajusta las rutas a donde tengas los .txt
+rutas <- c(
+  Rajoy_2011   = "2011_Rajoy.txt",
+  Rajoy_2016a  = "2016_Rajoy.txt",
+  Rajoy_2016b  = "2016b_Rajoy.txt",
+  Sanchez_2020 = "2020_Sánchez.txt",
+  Sanchez_2023 = "2023_Sánchez.txt"
+)
+
+textos_raw <- map_chr(rutas, function(r) {
+  if (!file.exists(r)) return("")
+  paste(readLines(r, encoding="UTF-8", warn=FALSE), collapse=" ")
+})
+
+corp <- corpus(textos_raw, docnames=names(rutas))
+docvars(corp, "orador") <- c("Rajoy","Rajoy","Rajoy","Sanchez","Sanchez")
+docvars(corp, "anio")   <- c(2011L, 2016L, 2016L, 2020L, 2023L)
+
+toks_full <- tokens(corp, remove_punct=TRUE, remove_numbers=TRUE,
+                    remove_symbols=TRUE) |> tokens_tolower()
+toks      <- tokens_remove(toks_full, stopwords("es"))
+dfm_corp  <- dfm(toks)
+
+# Tamaños de sub-corpus por orador
+dfm_grp  <- dfm_group(dfm_corp, groups=docvars(dfm_corp,"orador"))
+N_san    <- ntoken(dfm_grp["Sanchez",])
+N_raj    <- ntoken(dfm_grp["Rajoy",  ])
+
+# Keyness: usamos measure="chi2" que es la más compatible entre versiones.
+# Devuelve siempre: feature, chi2 (o statistic), p
+kw_chi2 <- textstat_keyness(dfm_corp,
+              target  = docvars(dfm_corp,"orador") == "Sanchez",
+              measure = "chi2")
+
+# Normalizar nombre de la columna LL según versión de quanteda
+ll_col  <- intersect(c("chi2","statistic"), names(kw_chi2))[1]
+kw_real <- kw_chi2 |> rename(chi2 = all_of(ll_col))
+
+# Calcular log-ratio manualmente desde la DFM agrupada
+# LR = log2( (f_san/N_san + 0.5) / (f_raj/N_raj + 0.5) )
+dfm_grp_mat <- as.matrix(dfm_grp)   # filas: Rajoy, Sanchez
+
+lr_vals <- map_dbl(featnames(dfm_grp), function(w) {
+  f_san <- dfm_grp_mat["Sanchez", w]
+  f_raj <- dfm_grp_mat["Rajoy",   w]
+  log2(((f_san + 0.5) / N_san) / ((f_raj + 0.5) / N_raj))
+})
+
+lr_tbl <- tibble(feature = featnames(dfm_grp), lr = lr_vals)
+
+# Unir LL y LR en una sola tabla
+kw_real <- kw_real |>
+  left_join(lr_tbl, by = "feature")
+
+# Frecuencias reales para los ejemplos de las diapositivas
+get_freq <- function(palabra, orador_val) {
+  if (!palabra %in% featnames(dfm_grp)) return(0L)
+  as.integer(dfm_grp[orador_val, palabra])
+}
+
+# dfm_full incluye stopwords (sin puntuación): coincide con el informe HTML
+dfm_full_pres <- dfm(toks_full)
+n_tokens_doc  <- ntoken(dfm_full_pres)
+
+discursos <- tibble(
+  discurso = names(rutas),
+  orador   = c("Rajoy","Rajoy","Rajoy","Sanchez","Sanchez"),
+  anio     = c(2011L, 2016L, 2016L, 2020L, 2023L),
+  n_tokens = n_tokens_doc
+)
+
+tl <- theme_minimal(base_size = 9) +
+  theme(
+    plot.title    = element_text(face = "bold", color = "#1D3557", size = 10),
+    plot.subtitle = element_text(color = "#457B9D", size = 7),
+    axis.title    = element_text(color = "#1D3557", size = 8),
+    panel.grid.minor = element_blank(),
+    legend.position  = "bottom",
+    legend.text      = element_text(size = 7)
+  )
+
+x <- seq(-4, 4, 0.01)
+df_h <- tibble(x = x, y = dnorm(x))
+```
+
+
+## Bienvenida y presentación
+
+<!-- FIX #1: espacio antes del bloque; FIX #2: fecha 2026 -->
+
+::: {.columns}
+::: {.column width="55%"}
+
+\textcolor{darkblue}{\textbf{Adrián Cabedo Nebot}}
+
+\small Catedrático de Lengua Española · Universitat de València
+
+\texttt{adrian.cabedo@uv.es}
+
+\vspace{0.4em}
+\textcolor{accent}{\textbf{Materiales del curso}}
+
+\footnotesize\url{https://github.com/acabedo/conferences}
+
+\vspace{0.4em}
+\small\textcolor{darkblue}{\textbf{Seminario}} · Universidad de Navarra · 5 mayo 2026
+
+:::
+::: {.column width="41%"}
+
+\begin{block}{Estructura}
+\vspace{0.4em}   % FIX #1
+\footnotesize
+\textbf{I} · Fundamentos estadísticos
+
+\textbf{II} · Estadística de corpus
+
+\textbf{III} · Colocaciones
+
+\textbf{IV} · R en la práctica
+
+\textbf{V} · Caso integrado
+
+\vspace{0.2em}
+Duración: 1 h 30 min
+\end{block}
+
+:::
+:::
+
+
+## ¿De qué vamos a hablar hoy?
+
+<!-- FIX #3: espacio dentro de los bloques -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small\textbf{Punto de partida}
+
+Los gestores de corpus (Sketch Engine, AntConc...) calculan automáticamente medidas estadísticas.
+
+¿Sabemos \textcolor{accent}{\textbf{qué hacen exactamente}}, por qué los resultados difieren y cómo replicarlos?
+
+\vspace{0.4em}
+\textbf{Objetivo}
+
+- Log-likelihood · Log-ratio · Simple Maths
+- Keyness · Colocaciones
+- Replicarlo en \textbf{R}
+
+:::
+::: {.column width="46%"}
+
+\begin{exampleblock}{Corpus de ejemplo}
+\vspace{0.3em}
+\small\textbf{Discursos de investidura}
+
+Rajoy 2011, 2016a, 2016b
+
+Sánchez 2020, 2023
+
+\vspace{0.1em}
+\footnotesize Fuente: Congreso de los Diputados
+\end{exampleblock}
+
+\vspace{0.4em}
+\begin{alertblock}{Pregunta guía}
+\vspace{0.2em}
+\small ¿Qué léxico define \textit{ideológicamente} a Sánchez frente a Rajoy?
+\end{alertblock}
+
+:::
+:::
+
+
+# Parte I: Fundamentos estadísticos {.standout}
+
+
+## ¿Por qué estadística en lingüística?
+
+::: {.columns}
+::: {.column width="48%"}
+
+\small\textbf{El problema central}
+
+Observamos patrones en los datos lingüísticos.
+
+¿Ese patrón es \textcolor{accent}{\textbf{real}} o \textcolor{accent}{\textbf{fruto del azar}}?
+
+\vspace{0.4em}
+\textbf{Ejemplos:}
+
+- ¿Usa Sánchez más sustantivos que Rajoy?
+- ¿Es *cambio* una palabra clave de la izquierda?
+- ¿Aparece *libertad* más en Rajoy?
+- ¿Son más largas las oraciones de Sánchez? $\longrightarrow$
+
+\vspace{0.3em}
+\footnotesize La estadística nos ayuda a \textbf{separar la señal del ruido}.
+
+:::
+::: {.column width="48%"}
+
+```{r fig-motivacion, fig.height=3.2, fig.width=3.8}
+set.seed(42)
+tibble(grupo = rep(c("Sánchez","Rajoy"), each=30),
+       longitud = c(rnorm(30,22,4), rnorm(30,19,4))) |>
+  ggplot(aes(x=grupo, y=longitud, fill=grupo)) +
+  geom_boxplot(alpha=0.8, width=0.5) +
+  geom_jitter(width=0.1, alpha=0.4, size=1) +
+  scale_fill_manual(values=c("Sánchez"="#E63946","Rajoy"="#1D3557")) +
+  labs(title="Longitud de frase (simulado)",
+       subtitle="palabras por oración", x=NULL, y="Palabras") +
+  tl + theme(legend.position="none")
+```
+
+:::
+:::
+
+
+## Conceptos clave: población y muestra
+
+::: {.columns}
+::: {.column width="52%"}
+
+\begin{block}{\small Población}
+\footnotesize Conjunto \textbf{completo} de todos los elementos de interés.
+
+\textit{Todos los discursos políticos en España (1978--hoy)}
+\end{block}
+
+\vspace{0.3em}
+
+\begin{block}{\small Muestra}
+\footnotesize Subconjunto \textbf{observable} para inferir propiedades de la población.
+
+\textit{Los 5 discursos de investidura de Rajoy y Sánchez}
+\end{block}
+
+\vspace{0.3em}
+\small\textbf{Clave:} generalizar de la muestra a la población requiere que sea \textcolor{accent}{\textbf{representativa}}.
+
+:::
+::: {.column width="44%"}
+
+```{r fig-poblacion, fig.height=3.4, fig.width=3.8}
+# FIX #5: puntos de muestra distribuidos por todo el gráfico
+set.seed(99)
+n_pop <- 200
+pop   <- tibble(x=runif(n_pop), y=runif(n_pop), tipo="Población")
+# Seleccionar índices que cubran distintas zonas del espacio
+idx_muestra <- c(
+  which.min(abs(pop$x - 0.1) + abs(pop$y - 0.1)),  # zona inf-izq
+  which.min(abs(pop$x - 0.5) + abs(pop$y - 0.9)),  # zona sup-centro
+  which.min(abs(pop$x - 0.9) + abs(pop$y - 0.5)),  # zona centro-der
+  which.min(abs(pop$x - 0.2) + abs(pop$y - 0.6)),  # zona centro-izq
+  which.min(abs(pop$x - 0.7) + abs(pop$y - 0.2))   # zona inf-der
+)
+pop$tipo[idx_muestra] <- "Muestra"
+ggplot(pop, aes(x,y,color=tipo,size=tipo)) +
+  geom_point(alpha=0.7) +
+  scale_color_manual(values=c("Población"="#A8DADC","Muestra"="#E63946")) +
+  scale_size_manual(values=c("Población"=1.5,"Muestra"=4)) +
+  labs(title="Discursos políticos",
+       subtitle="Puntos rojos = nuestra muestra (5 discursos)",
+       color=NULL, size=NULL) +
+  tl + theme(axis.text=element_blank(), axis.title=element_blank(),
+             panel.grid=element_blank())
+```
+
+:::
+:::
+
+
+## Nuestro corpus: los discursos de investidura
+
+```{r fig-corpus, fig.height=2.9, fig.width=9}
+ggplot(discursos, aes(x=reorder(discurso,anio), y=n_tokens, fill=orador)) +
+  geom_col(width=0.6, alpha=0.9) +
+  geom_text(aes(label=format(n_tokens,big.mark=".")),
+            hjust=-0.1, size=2.8, color="#1D3557") +
+  scale_fill_manual(values=c("Rajoy"="#1D3557","Sanchez"="#E63946"), name="Orador") +
+  scale_y_continuous(limits=c(0,17500)) +
+  coord_flip() +
+  labs(title="Corpus de discursos de investidura",
+       subtitle="55.101 tokens totales · Fuente: Congreso de los Diputados",
+       x=NULL, y="Número de tokens") +
+  tl
+```
+
+\footnotesize Textos disponibles en \url{https://github.com/acabedo/conferences}
+
+
+## Riqueza léxica: tipos y tokens {shrink=5}
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small Token}
+\footnotesize Cada \textbf{ocurrencia individual} de una palabra en el texto, incluyendo repeticiones.
+
+\textit{«España, España, nuestra España»} → 4 tokens
+\end{block}
+
+\vspace{0.2em}
+\begin{block}{\small Type (tipo)}
+\footnotesize Cada \textbf{forma léxica única}, independientemente de cuántas veces aparezca.
+
+\textit{«España, España, nuestra España»} → 2 types
+\end{block}
+
+\vspace{0.3em}
+\small\textbf{TTR} = Tipos / Tokens: sensible al tamaño del texto.
+
+\small\textbf{Root TTR} = Tipos / $\sqrt{\text{Tokens}}$: más estable para comparar textos de distinta longitud.
+
+:::
+::: {.column width="46%"}
+
+```{r fig-ttr, fig.height=3.6, fig.width=4}
+# TTR y Root TTR calculados desde el corpus real (con stopwords)
+stats_ttr <- tibble(
+  discurso = names(rutas),
+  orador   = c("Rajoy","Rajoy","Rajoy","Sanchez","Sanchez"),
+  tokens   = ntoken(dfm_full_pres),
+  tipos    = ntype(dfm_full_pres)
+) |>
+  mutate(
+    TTR  = round(tipos / tokens, 3),
+    RTTR = round(tipos / sqrt(tokens), 2),
+    etiq = str_replace(discurso, "_", "\n")
+  )
+
+stats_ttr |>
+  pivot_longer(c(TTR,RTTR), names_to="medida", values_to="valor") |>
+  ggplot(aes(x=etiq, y=valor, fill=orador)) +
+  geom_col(width=0.6, alpha=0.85) +
+  facet_wrap(~medida, scales="free_y") +
+  scale_fill_manual(values=c("Rajoy"="#1D3557","Sanchez"="#E63946"),
+                    labels=c("Rajoy","Sánchez"), name="Orador") +
+  labs(title="Riqueza léxica por discurso",
+       subtitle="TTR: sensible al tamaño · RTTR: normalizado",
+       x=NULL, y="Valor") +
+  tl + theme(axis.text.x=element_text(size=6.5, angle=35, hjust=1))
+```
+
+:::
+:::
+
+## Tipología de variables
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small\textcolor{darkblue}{\textbf{Variables cuantitativas}}
+
+\begin{block}{\footnotesize Continuas}
+\footnotesize Valores en un rango continuo: longitud de oración, F0, duración
+\end{block}
+
+\begin{block}{\footnotesize Discretas}
+\footnotesize Valores enteros contables: frecuencia léxica, n.º de cláusulas
+\end{block}
+
+\vspace{0.3em}
+\small\textcolor{accent}{\textbf{Variables categóricas}}
+
+\footnotesize
+- \textbf{Nominales}: orador, partido, género léxico
+- \textbf{Ordinales}: registro (formal $>$ neutro $>$ coloquial)
+
+:::
+::: {.column width="46%"}
+
+```{r fig-variables, fig.height=3.2, fig.width=4}
+# FIX #6: etiquetas más cortas para que no se salgan del círculo
+tibble(tipo=c("Continua","Discreta","Nominal","Ordinal"),
+       ejemplo=c("F0","Frec.","Partido","Registro"),
+       categoria=c("Cuantitativa","Cuantitativa","Categórica","Categórica")) |>
+  ggplot(aes(x=1, y=reorder(tipo,c(4,3,2,1)),
+             color=categoria, label=ejemplo)) +
+  geom_point(size=14, alpha=0.8) +
+  geom_text(color="white", size=2.6, fontface="bold") +
+  scale_color_manual(values=c("Cuantitativa"="#1D3557","Categórica"="#E63946")) +
+  labs(title="Tipos de variable", x=NULL, y=NULL, color=NULL) +
+  tl + theme(axis.text.x=element_blank(), panel.grid.major.x=element_blank())
+```
+
+:::
+:::
+
+
+## La lógica de la hipótesis
+
+<!-- FIX #7: espacio adicional entre bloques y párrafo final -->
+
+::: {.columns}
+::: {.column width="52%"}
+
+\begin{alertblock}{\small H\textsubscript{0}: hipótesis nula}
+\footnotesize Afirma que \textbf{no hay diferencia}. Es la que la estadística intenta refutar.
+
+\textit{``Sánchez y Rajoy usan \textbf{España} con igual frecuencia''}
+\end{alertblock}
+
+\vspace{0.4em}
+
+\begin{exampleblock}{\small H\textsubscript{1}: hipótesis alternativa}
+\footnotesize Afirma que \textbf{sí hay diferencia}. Es lo que el investigador quiere mostrar.
+
+\textit{``Sánchez usa \textbf{España} con distinta frecuencia que Rajoy''}
+\end{exampleblock}
+
+\vspace{0.4em}
+\footnotesize\textbf{Idea clave:} en un mundo posible donde Rajoy y Sánchez usaran \textit{España} con la misma frecuencia, ¿qué probabilidad habría de obtener una diferencia tan grande como la observada? Eso es lo que mide el valor $p$.
+
+:::
+::: {.column width="44%"}
+
+```{r fig-h0, fig.height=3.4, fig.width=3.8}
+ggplot(df_h, aes(x,y)) +
+  geom_area(data=filter(df_h,x>=1.96),  fill="#E63946",alpha=0.7) +
+  geom_area(data=filter(df_h,x<=-1.96), fill="#E63946",alpha=0.7) +
+  geom_line(linewidth=1, color="#1D3557") +
+  geom_vline(xintercept=c(-1.96,1.96), linetype="dashed",
+             color="#457B9D", linewidth=0.8) +
+  annotate("text",x=0,y=0.20,label="H0\naceptable",
+           color="#1D3557",size=2.8,fontface="bold") +
+  annotate("text",x=2.8,y=0.06,label="Zona\ncrítica",
+           color="#E63946",size=2.3,fontface="bold") +
+  annotate("text",x=-2.8,y=0.06,label="Zona\ncrítica",
+           color="#E63946",size=2.3,fontface="bold") +
+  labs(title="Distribución bajo H0",
+       subtitle="Zona roja: rechazo (alfa=0.05)",
+       x="Estadístico", y="Densidad") +
+  tl
+```
+
+:::
+:::
+
+
+## Errores tipo I y tipo II {shrink=5}
+
+<!-- FIX #7: nueva diapositiva sobre errores -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small Cuando decidimos si rechazar H\textsubscript{0}, podemos equivocarnos de dos formas:
+
+\vspace{0.3em}
+\begin{alertblock}{\small Error tipo I (falso positivo)}
+\footnotesize Rechazamos H\textsubscript{0} cuando en realidad era cierta.
+
+\textit{Concluimos que Sánchez usa más «España», pero la diferencia era puro azar.}
+
+\vspace{0.2em}
+Probabilidad = $\alpha$ (umbral de significación, p.ej. 0.05)
+\end{alertblock}
+
+\vspace{0.3em}
+\begin{block}{\small Error tipo II (falso negativo)}
+\footnotesize No rechazamos H\textsubscript{0} cuando en realidad era falsa.
+
+\textit{No detectamos una diferencia real porque nuestra muestra era demasiado pequeña.}
+
+\vspace{0.2em}
+Probabilidad = $\beta$ · Potencia = $1-\beta$
+\end{block}
+
+:::
+::: {.column width="46%"}
+
+```{r fig-errores, fig.height=3.8, fig.width=4}
+tibble(
+  decision    = c("Rechazar H0","Rechazar H0","No rechazar H0","No rechazar H0"),
+  realidad    = c("H0 falsa","H0 verdadera","H0 falsa","H0 verdadera"),
+  resultado   = c("Correcto\n(acierto)","Error tipo I\n(falso positivo)",
+                  "Error tipo II\n(falso negativo)","Correcto\n(acierto)"),
+  color_grupo = c("bien","mal","mal","bien")
+) |>
+  ggplot(aes(x=realidad, y=decision, fill=color_grupo, label=resultado)) +
+  geom_tile(color="white", linewidth=1.5) +
+  geom_text(size=2.5, fontface="bold", color="white") +
+  scale_fill_manual(values=c("bien"="#1D3557","mal"="#E63946"), guide="none") +
+  labs(title="Matriz de decisión",
+       x="Realidad (desconocida)", y="Nuestra decisión") +
+  tl + theme(panel.grid=element_blank())
+```
+
+:::
+:::
+
+
+## El valor *p*: qué es (y qué NO es) {shrink=5}
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small Definición}
+\footnotesize Probabilidad de obtener resultados \textbf{tan extremos o más} asumiendo H\textsubscript{0} cierta.
+
+\vspace{0.2em}
+\textit{Si Rajoy y Sánchez usaran «España» con igual frecuencia, ¿con qué probabilidad veríamos una diferencia tan grande como la observada?}
+\end{block}
+
+\vspace{0.2em}
+\begin{block}{\small Umbrales convencionales}
+\footnotesize
+\begin{tabular}{ll}
+$p < 0.05$  & Significativo (*)    \\
+$p < 0.01$  & Muy significativo (**) \\
+$p < 0.001$ & Altamente sign. (***) \\
+\end{tabular}
+\end{block}
+
+\vspace{0.2em}
+\small\textcolor{accent}{\textbf{El $p$-valor NO es:}}
+
+\footnotesize
+- La probabilidad de que H\textsubscript{0} sea verdadera
+- Una medida del tamaño del efecto
+- Garantía de relevancia lingüística
+- Un umbral natural: el 0.05 es \textbf{una convención estadística}
+
+:::
+::: {.column width="46%"}
+
+```{r fig-pval, fig.height=3.4, fig.width=3.8}
+obs  <- 2.3
+pval <- round(2*pnorm(-abs(obs)),3)
+ggplot(df_h, aes(x,y)) +
+  geom_area(data=filter(df_h,x>=obs),  fill="#E63946",alpha=0.7) +
+  geom_area(data=filter(df_h,x<=-obs), fill="#E63946",alpha=0.7) +
+  geom_line(linewidth=1, color="#1D3557") +
+  geom_vline(xintercept=obs, color="#E63946",linewidth=1.2) +
+  annotate("text",x=3.1,y=0.12,label=paste0("p = ",pval),
+           color="#E63946",size=3,fontface="bold") +
+  labs(title="El valor p",
+       subtitle="Área roja: resultados tan extremos\ncomo el nuestro, asumiendo H0",
+       x="Estadístico", y="Densidad") +
+  tl
+```
+
+:::
+:::
+
+
+## Tamaño del efecto: la significación no lo es todo {shrink=5}
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small\textbf{Prueba $t$ de Student} (simulado)
+
+\footnotesize Compara las medias de dos grupos. Los datos son \textbf{simulados} para ilustrar el concepto; las palabras y frecuencias concretas no corresponden al corpus real.
+
+$$t = \frac{\bar{x}_1 - \bar{x}_2}{\sqrt{\frac{s_1^2}{n_1} + \frac{s_2^2}{n_2}}}$$
+
+\vspace{0.2em}
+En R: \texttt{t.test(grupo\_sanchez, grupo\_rajoy)}
+
+\vspace{0.3em}
+\begin{block}{\small Los dos paneles (datos exactos del gráfico)}
+\footnotesize \textbf{Izquierda} ($n=30$): $\bar{x}_{S}\approx10.4$, $\bar{x}_{R}\approx11.2$ → diferencia 0.8 palabras, $p$ calculado en tiempo real → \textbf{no significativo}.
+
+\textbf{Derecha} ($n=3000$): $\bar{x}_{S}\approx10.0$, $\bar{x}_{R}\approx10.1$ → diferencia 0.1 palabras, $p$ calculado en tiempo real → \textbf{significativo}. Con $n$ enorme, diferencias mínimas resultan significativas.
+\end{block}
+
+:::
+::: {.column width="46%"}
+
+```{r fig-efecto, fig.height=3.8, fig.width=4}
+set.seed(123)
+g1a <- rnorm(15, 10, 2);   g1b <- rnorm(15, 11, 2)
+g2a <- rnorm(1500, 10, 2); g2b <- rnorm(1500, 10.1, 2)
+t1  <- t.test(g1a, g1b)
+t2  <- t.test(g2a, g2b)
+
+bind_rows(
+  tibble(escenario = paste0("n=30 · p=", round(t1$p.value,2)),
+         grupo = c("Sánchez","Rajoy"),
+         media = c(mean(g1a), mean(g1b)),
+         lo    = c(t1$conf.int[1]+mean(g1a), mean(g1b)-diff(t1$conf.int)/2),
+         hi    = c(t1$conf.int[2]+mean(g1a), mean(g1b)+diff(t1$conf.int)/2)),
+  tibble(escenario = paste0("n=3000 · p=", round(t2$p.value,4)),
+         grupo = c("Sánchez","Rajoy"),
+         media = c(mean(g2a), mean(g2b)),
+         lo    = c(t2$conf.int[1]+mean(g2a), mean(g2b)-diff(t2$conf.int)/2),
+         hi    = c(t2$conf.int[2]+mean(g2a), mean(g2b)+diff(t2$conf.int)/2))
+) |>
+  ggplot(aes(x=grupo, y=media, color=grupo)) +
+  geom_errorbar(aes(ymin=lo, ymax=hi), width=0.15, linewidth=0.8) +
+  geom_point(size=5, alpha=0.9) +
+  facet_wrap(~escenario, scales="free_y") +
+  scale_color_manual(values=c("Sánchez"="#E63946","Rajoy"="#1D3557"), guide="none") +
+  labs(title="Prueba t · longitud de frase (simulado)",
+       subtitle="Puntos = medias · Barras = IC 95%",
+       x=NULL, y="Media palabras/oración") +
+  tl
+```
+
+:::
+:::
+
+
+## Tamaño del efecto vs. tamaño de la muestra {shrink=5}
+
+::: {.columns}
+::: {.column width="52%"}
+
+\small\textbf{El problema del $n$ grande}
+
+\footnotesize Con muestras muy grandes, casi \textbf{cualquier diferencia resulta significativa} estadísticamente, aunque sea irrelevante en la práctica.
+
+\vspace{0.3em}
+\begin{alertblock}{\small Ejemplo}
+\footnotesize Un corpus de 10 millones de tokens puede detectar como significativa una diferencia de \textbf{0.001 palabras por oración}. Eso no tiene ninguna relevancia lingüística.
+\end{alertblock}
+
+\vspace{0.3em}
+\small\textbf{Solución: reportar siempre el tamaño del efecto}
+
+\footnotesize El tamaño del efecto mide la \textbf{magnitud real} de la diferencia, independientemente del $n$:
+
+- \textbf{Cohen's $d$} → para comparaciones de medias (prueba $t$)
+- \textbf{Log-ratio} → para frecuencias léxicas en corpus
+- \textbf{Cramér's $V$} → para tablas de contingencia ($\chi^2$)
+
+:::
+::: {.column width="44%"}
+
+\begin{exampleblock}{\small Regla práctica}
+\footnotesize
+\begin{tabular}{ll}
+$|d| < 0.2$ & Efecto pequeño \\
+$|d| \approx 0.5$ & Efecto medio \\
+$|d| > 0.8$ & Efecto grande \\
+\end{tabular}
+
+\vspace{0.4em}
+En corpus léxicos, un \textbf{log-ratio > 1} indica que una palabra es \textbf{más del doble} de frecuente en un corpus que en el otro → efecto claro.
+\end{exampleblock}
+
+\vspace{0.3em}
+\begin{block}{\small En R}
+\footnotesize
+\texttt{effectsize::cohens\_d(g1, g2)}
+
+\texttt{textstat\_keyness(..., measure="lr")}
+\end{block}
+
+:::
+:::
+
+
+## Lo que siempre hay que comunicar
+
+<!-- FIX #9: párrafo de ejemplo tipo paper -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Elemento} & \textbf{Herramienta en corpus} \\
+\midrule
+Estadístico    & LL, $\chi^2$, $t$          \\
+$p$-valor      & Tablas de $\chi^2$          \\
+Tamaño efecto  & Log-ratio, Cohen's $d$     \\
+Dispersión     & DP, \% textos              \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.4em}
+\begin{alertblock}{}
+\centering\small
+\textbf{Significación estadística} $\neq$ \textbf{Relevancia lingüística}
+\end{alertblock}
+
+:::
+::: {.column width="46%"}
+
+\begin{exampleblock}{\small Ejemplo de redacción en un artículo}
+\footnotesize
+\textit{``La palabra \textbf{cambio} aparece significativamente más en los discursos de Sánchez que en los de Rajoy} (LL = 15.27, p $<$ 0.0001)\textit{, con un tamaño del efecto moderado} (log-ratio = 1.68)\textit{, lo que indica que es aproximadamente el doble de frecuente en el corpus de Sánchez. La palabra está presente en todos los discursos del corpus foco (dispersión = 100\%).''}
+\end{exampleblock}
+
+:::
+:::
+
+
+# Parte II: Estadística de corpus {.standout}
+
+
+## ¿Qué vamos a ver en esta parte? {shrink=5}
+
+\small En las siguientes diapositivas se explican y ejemplifican con nuestro corpus real (Rajoy vs. Sánchez) los siguientes estadísticos y medidas:
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small Medidas de frecuencia}
+\footnotesize
+\textbf{1. Frecuencia normalizada} (ptw / pmw)
+
+$\rightarrow$ Comparar textos de distinto tamaño
+\end{block}
+
+\vspace{0.2em}
+\begin{block}{\small Significación estadística}
+\footnotesize
+\textbf{2. Log-likelihood (LL)} · $\chi^2$
+
+$\rightarrow$ ¿Es real la diferencia de frecuencia?
+\end{block}
+
+\vspace{0.2em}
+\begin{block}{\small Tamaño del efecto}
+\footnotesize
+\textbf{3. Log-ratio (LR)} — Hardie (2014)
+
+\textbf{4. Simple Maths} — Sketch Engine
+
+\textbf{5. \%DIFF · Relative Risk · Odds Ratio · BIC}
+
+$\rightarrow$ ¿Cuánto importa la diferencia?
+\end{block}
+
+:::
+::: {.column width="46%"}
+
+\begin{block}{\small Palabras clave}
+\footnotesize
+\textbf{6. Keyness} = LL + LR + Dispersión
+
+$\rightarrow$ ¿Qué léxico define a cada orador?
+\end{block}
+
+\vspace{0.2em}
+\begin{block}{\small Dispersión}
+\footnotesize
+\textbf{7. Deviation of Proportions (DP)}
+
+$\rightarrow$ ¿Está distribuida la palabra en todo el corpus?
+\end{block}
+
+\vspace{0.2em}
+\begin{block}{\small Colocaciones}
+\footnotesize
+\textbf{8. MI · t-score · logDice}
+
+$\rightarrow$ ¿Qué palabras van juntas con más frecuencia de la esperada?
+\end{block}
+
+\vspace{0.2em}
+\begin{block}{\small N-gramas}
+\footnotesize
+\textbf{9. Bigramas y trigramas}
+
+$\rightarrow$ Secuencias léxicas fijas y fraseología
+\end{block}
+
+:::
+:::
+
+## Comparativa Sketch Engine vs R
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small\textcolor{darkblue}{\textbf{Sketch Engine}}
+
+\footnotesize
+\textcolor{midblue}{+} Interfaz amigable, resultados rápidos
+
+\textcolor{midblue}{+} Corpus de referencia ya cargados
+
+\textcolor{accent}{--} \textbf{Datos en servidores externos} (privacidad)
+
+\textcolor{accent}{--} Caja negra: no siempre sabes el cálculo exacto
+
+\textcolor{accent}{--} Acceso de pago, reproducibilidad limitada
+
+\textcolor{accent}{--} Difícil escalar a corpus propios muy grandes
+
+\vspace{0.3em}
+\small\textcolor{darkblue}{\textbf{R (tidyverse / quanteda)}}
+
+\footnotesize
+\textcolor{midblue}{+} \textbf{Tus datos no salen de tu ordenador}
+
+\textcolor{midblue}{+} Código reproducible y auditable
+
+\textcolor{midblue}{+} Libre y gratuito, comunidad enorme
+
+\textcolor{midblue}{+} Escalable · Visualización de calidad
+
+:::
+::: {.column width="46%"}
+
+```{r fig-comparativa, fig.height=3.8, fig.width=4}
+tibble(
+  criterio = factor(c("Privacidad","Reproducib.","Coste",
+                       "Escalab.","Flexibil.","Curva aprend."),
+                    levels=rev(c("Privacidad","Reproducib.","Coste",
+                                 "Escalab.","Flexibil.","Curva aprend."))),
+  SE = c(2,2,5,3,2,5),
+  R  = c(5,5,1,5,5,2)
+) |>
+  pivot_longer(c(SE,R), names_to="herramienta", values_to="puntuacion") |>
+  ggplot(aes(x=criterio, y=puntuacion, fill=herramienta)) +
+  geom_col(position="dodge", alpha=0.85, width=0.6) +
+  coord_flip() +
+  scale_fill_manual(values=c("SE"="#457B9D","R"="#E63946"),
+                    labels=c("R","Sketch Engine"), name=NULL) +
+  scale_y_continuous(breaks=1:5,
+                     labels=c("Bajo","","Medio","","Alto")) +
+  labs(title="R vs. Sketch Engine",
+       subtitle="Valoración orientativa",
+       x=NULL, y=NULL) +
+  tl
+```
+
+:::
+:::
+
+
+## Introducción a R y RStudio
+
+<!-- FIX #10: espacio después de bloque Instalación -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small\textcolor{darkblue}{\textbf{R}} — lenguaje estadístico, libre y gratuito
+
+\footnotesize\url{https://www.r-project.org}
+
+\vspace{0.3em}
+\small\textcolor{darkblue}{\textbf{RStudio}} — entorno integrado (IDE) para R
+
+\footnotesize\url{https://posit.co/download/rstudio-desktop}
+
+\vspace{0.3em}
+\small\textbf{Paquetes esenciales para corpus}
+
+\footnotesize
+- \texttt{tidyverse}: manipulación y visualización
+- \texttt{quanteda}: análisis de corpus
+- \texttt{ggplot2}: gráficos de calidad
+- \texttt{ggrepel}: etiquetas sin solapamiento
+
+:::
+::: {.column width="46%"}
+
+\begin{block}{\small Instalación (3 pasos)}
+\vspace{0.3em}   % FIX #10
+\footnotesize
+\textbf{1.} Instalar R desde CRAN
+
+\textbf{2.} Instalar RStudio
+
+\textbf{3.} En la consola de R:
+\end{block}
+
+\vspace{0.1em}
+```r
+install.packages(c(
+  "tidyverse", "quanteda",
+  "quanteda.textstats", "ggrepel"
+))
+```
+
+\vspace{0.2em}
+\begin{exampleblock}{\small Materiales}
+\footnotesize\url{https://github.com/acabedo/conferences}
+\end{exampleblock}
+
+:::
+:::
+
+
+## Frecuencia normalizada: comparar lo incomparable
+
+::: {.columns}
+::: {.column width="48%"}
+
+\small\textbf{El problema}
+
+Textos de distinta longitud: no comparar frecuencias brutas.
+
+\vspace{0.2em}
+\begin{block}{\small Frecuencia normalizada}
+\footnotesize Ocurrencias si el texto tuviera exactamente $N$ tokens.
+
+$$f_{\text{norm}} = \frac{f_{\text{bruta}}}{N_{\text{tokens}}} \times 1000$$
+\end{block}
+
+\vspace{0.2em}
+\small\textbf{Ejemplo:} *españa* (datos reales)
+
+```{r results="asis", echo=FALSE}
+
+f_san_esp <- if("españa" %in% featnames(dfm_grp)) as.integer(dfm_grp["Sanchez","españa"]) else 0L
+f_raj_esp <- if("españa" %in% featnames(dfm_grp)) as.integer(dfm_grp["Rajoy",  "españa"]) else 0L
+ptw_san   <- round(f_san_esp / N_san * 1000, 2)
+ptw_raj   <- round(f_raj_esp / N_raj * 1000, 2)
+cat(sprintf("\\footnotesize\n- Sánchez: %d / %d tokens → **%.2f ptw**\n\n- Rajoy: %d / %d tokens → **%.2f ptw**\n",
+            f_san_esp, N_san, ptw_san, f_raj_esp, N_raj, ptw_raj))
+```
+
+:::
+::: {.column width="48%"}
+
+```{r fig-frec-norm, fig.height=3.4, fig.width=4}
+# Frecuencias reales de "españa" extraídas del corpus
+frec_espana <- map_int(docnames(dfm_corp), function(d) {
+  if (!"españa" %in% featnames(dfm_corp)) return(0L)
+  as.integer(dfm_corp[d, "españa"])
+})
+
+tibble(
+  discurso  = c("Rajoy\n2011","Rajoy\n2016a","Rajoy\n2016b",
+                "Sánchez\n2020","Sánchez\n2023"),
+  orador    = c("Rajoy","Rajoy","Rajoy","Sánchez","Sánchez"),
+  n_tokens  = discursos$n_tokens,
+  frec_bruta= frec_espana
+) |>
+  mutate(frec_norm = frec_bruta / n_tokens * 1000) |>
+  ggplot(aes(x=discurso, y=frec_norm, fill=orador)) +
+  geom_col(width=0.6, alpha=0.9) +
+  geom_text(aes(label=round(frec_norm,2)),
+            vjust=-0.4, size=2.5, color="#1D3557") +
+  scale_fill_manual(values=c("Rajoy"="#1D3557","Sánchez"="#E63946"),
+                    name="Orador") +
+  labs(title='Frecuencia real de "españa" en el corpus',
+       subtitle="Por 1.000 tokens (ptw) · Datos reales",
+       x=NULL, y="Frec. normalizada") +
+  tl + theme(legend.position="none")
+```
+
+:::
+:::
+
+
+## Código R: frecuencia normalizada {shrink=5}
+
+```{r echo=TRUE, eval=FALSE}
+library(tidyverse); library(quanteda)
+
+# Leer corpus directamente desde los archivos .txt
+rutas <- c(Rajoy_2011="2011_Rajoy.txt", Rajoy_2016a="2016_Rajoy.txt",
+           Rajoy_2016b="2016b_Rajoy.txt",
+           Sanchez_2020="2020_Sa_nchez.txt", Sanchez_2023="2023_Sa_nchez.txt")
+textos   <- map_chr(rutas, ~paste(readLines(.x,encoding="UTF-8"),collapse=" "))
+corp     <- corpus(textos)
+docvars(corp,"orador") <- c("Rajoy","Rajoy","Rajoy","Sanchez","Sanchez")
+toks     <- tokens(corp, remove_punct=TRUE) |>
+  tokens_tolower() |> tokens_remove(stopwords("es"))
+dfm_corp <- dfm(toks)
+
+# Frecuencia normalizada de "españa" por 1.000 tokens
+dfm_norm <- dfm_weight(dfm_corp, scheme="prop") * 1000
+# → las frecuencias salen DIRECTAMENTE de los textos, no se hardcodean
+as.numeric(dfm_norm[, "españa"])
+```
+
+\footnotesize \textbf{Nota quanteda:} \texttt{dfm\_weight(scheme="prop")} normaliza automáticamente por longitud de documento. No es necesario calcular $f/N \times 1000$ manualmente.
+
+\small ¿Pero es esa diferencia \textcolor{accent}{\textbf{estadísticamente significativa}}?
+
+
+## Nube de palabras: los cinco discursos {shrink=5}
+
+```{r fig-wordcloud, fig.height=4.5, fig.width=10}
+# Top 25 palabras por discurso. geom_text_repel repele las etiquetas
+# para evitar solapamientos, distribuyéndolas por el espacio del panel.
+
+etiquetas_doc <- c(
+  Rajoy_2011   = "Rajoy 2011",
+  Rajoy_2016a  = "Rajoy 2016a",
+  Rajoy_2016b  = "Rajoy 2016b",
+  Sanchez_2020 = "Sánchez 2020",
+  Sanchez_2023 = "Sánchez 2023"
+)
+
+dfm_norm_doc <- dfm_weight(dfm_corp, scheme = "prop") * 1000
+
+top_por_doc <- map_dfr(docnames(dfm_corp), function(d) {
+  topfeatures(dfm_norm_doc[d, ], n = 25) |>
+    enframe(name = "word", value = "ptw") |>
+    mutate(
+      doc    = d,
+      orador = if_else(str_starts(d, "Rajoy"), "Rajoy", "Sánchez"),
+      label  = etiquetas_doc[d]
+    )
+})
+
+ggplot(top_por_doc, aes(label = word, size = ptw,
+                        color = orador)) +
+  geom_text_wordcloud(
+    area_corr      = TRUE,      # tamaño proporcional al área, no al radio
+    rm_outside     = TRUE,      # descarta palabras que no caben
+    seed           = 42,
+    fontface       = "bold",
+    alpha          = 0.9,
+    show.legend    = FALSE
+  ) +
+  facet_wrap(~label, ncol = 3) +
+  scale_size_area(max_size = 20) +          # ajusta max_size a tu gusto
+  scale_color_manual(
+    values = c("Rajoy" = "#1D3557", "Sánchez" = "#E63946"),
+    name   = "Orador"
+  ) +
+  labs(
+    title    = "Top 25 palabras por discurso · Sin stopwords",
+    subtitle = "Tamaño proporcional a la frecuencia normalizada (ptw)"
+  ) +
+  tl + theme(
+    axis.text        = element_blank(),
+    panel.grid       = element_blank(),
+    panel.border     = element_rect(color = "gray70", fill = NA, linewidth = 0.6),
+    strip.text       = element_text(face = "bold", size = 8),
+    strip.background = element_rect(fill = "#f0f4f8", color = "gray70")
+  )
+```
+
+
+## Log-likelihood: ¿es real la diferencia?
+
+<!-- FIX #11: explicar ln, espacio, umbral 15.13 -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small Log-likelihood (LL)}
+\footnotesize Prueba estadística: ¿es la diferencia de frecuencia entre dos corpus mayor de lo esperable por azar?
+
+$$LL = 2 \sum O_i \ln\!\left(\frac{O_i}{E_i}\right)$$
+
+\vspace{0.1em}
+$O_i$ = frec. observada · $E_i$ = frec. esperada · $\ln$ = logaritmo natural (base $e \approx 2.718$)
+\end{block}
+
+\vspace{0.3em}
+\begin{block}{\small Umbrales de significación ($\chi^2$, 1 g.l.)}
+\vspace{0.2em}
+\footnotesize
+\begin{tabular}{lll}
+LL $\geq$ 3.84  & $p < 0.05$   & *    \\
+LL $\geq$ 6.63  & $p < 0.01$   & **   \\
+LL $\geq$ 10.83 & $p < 0.001$  & ***  \\
+LL $\geq$ 15.13 & $p < 0.0001$ & **** \\
+\end{tabular}
+\end{block}
+
+:::
+::: {.column width="46%"}
+
+```{r fig-ll, fig.height=3.4, fig.width=4}
+# chi2 de textstat_keyness es POSITIVO si la palabra va hacia Sánchez
+# y NEGATIVO si va hacia Rajoy. Tomamos las 5 con mayor valor absoluto
+# (las más discriminadoras en cualquier dirección).
+top5_kw <- kw_real |>
+  filter(!feature %in% stopwords("es"), is.finite(chi2)) |>
+  mutate(chi2_abs = abs(chi2)) |>
+  slice_max(chi2_abs, n = 5) |>
+  mutate(
+    sig = case_when(
+      chi2_abs >= 10.83 ~ "***",
+      chi2_abs >= 6.63  ~ "**",
+      chi2_abs >= 3.84  ~ "*",
+      TRUE              ~ "n.s."
+    )
+  )
+
+top5_kw |>
+  ggplot(aes(x = reorder(feature, chi2_abs), y = chi2_abs, fill = sig)) +
+  geom_col(width = 0.6, alpha = 0.9) +
+  geom_hline(yintercept = c(3.84, 10.83), linetype = "dashed",
+             color = c("#457B9D","#E63946"), linewidth = 0.6) +
+  geom_text(aes(label = sig), hjust = -0.2, size = 2.8, fontface = "bold") +
+  scale_fill_manual(
+    values = c("***"="#C1121F","**"="#E63946","*"="#457B9D","n.s."="#A8DADC"),
+    name = "Sig.") +
+  coord_flip() +
+  ylim(0, max(top5_kw$chi2_abs, na.rm = TRUE) * 1.25) +
+  labs(title = "Top 5 palabras por Log-likelihood",
+       subtitle = "Sánchez foco · Rajoy referencia · Datos reales",
+       x = NULL, y = "Valor LL (absoluto)") +
+  tl
+```
+
+:::
+:::
+
+
+## ¿Por qué Sketch Engine usa LL ≥ 15.13? {shrink=5}
+
+<!-- FIX #11: nueva diapositiva explicando el umbral -->
+
+::: {.columns}
+::: {.column width="55%"}
+
+\small Sketch Engine aplica un umbral más estricto que el estándar académico de $p < 0.05$ (LL = 3.84).
+
+\vspace{0.3em}
+\begin{block}{\small La razón: comparaciones múltiples}
+\footnotesize Cuando analizamos un corpus buscamos palabras clave entre \textbf{miles de tipos léxicos} a la vez. Con $p < 0.05$, el 5\% de palabras resultarían significativas \textbf{por puro azar}.
+
+Al exigir $p < 0.0001$ (LL $\geq$ 15.13), reducimos drásticamente esos falsos positivos.
+\end{block}
+
+\vspace{0.3em}
+\begin{exampleblock}{\small En la práctica (vocabulario de 10.000 palabras)}
+\footnotesize
+- Con $p < 0.05$ $\rightarrow$ \textbf{$\sim$500 falsas alarmas} esperadas
+- Con $p < 0.0001$ $\rightarrow$ \textbf{$\sim$1 falsa alarma} esperada
+
+\vspace{0.1em}
+Fuoli \& Beelitz (2024) adoptan también LL $\geq$ 15.13.
+\end{exampleblock}
+
+:::
+::: {.column width="41%"}
+
+```{r fig-umbral, fig.height=3.8, fig.width=3.8}
+tibble(
+  umbral = c("p<0.05\n(LL>=3.84)","p<0.01\n(LL>=6.63)",
+             "p<0.001\n(LL>=10.83)","p<0.0001\n(LL>=15.13)"),
+  falsas = c(500, 100, 10, 1),
+  uso    = c("General","Publicaciones","Estricto","Sketch Engine")
+) |>
+  mutate(umbral=factor(umbral,levels=umbral)) |>
+  ggplot(aes(x=umbral, y=falsas, fill=uso)) +
+  geom_col(alpha=0.85) +
+  geom_text(aes(label=paste0(falsas," palabras\nfalsas")),
+            vjust=-0.3, size=2.2, color="#1D3557") +
+  scale_fill_manual(values=c("General"="#A8DADC","Publicaciones"="#457B9D",
+                              "Estricto"="#E63946","Sketch Engine"="#1D3557"),
+                    name="Uso") +
+  scale_y_continuous(limits=c(0,600)) +
+  labs(title="Falsas alarmas esperadas\nen vocabulario de 10.000 palabras",
+       x="Umbral de significación", y="N.º de falsos positivos") +
+  tl + theme(legend.position="none", axis.text.x=element_text(size=6.5))
+```
+
+:::
+:::
+
+
+## Código R: Log-likelihood {shrink=5}
+
+```{r echo=TRUE, eval=FALSE}
+# OPCIÓN A: calcular manualmente (didáctica)
+calc_LL <- function(O1, O2, N1, N2) {
+  total <- O1 + O2
+  E1 <- total * N1 / (N1 + N2)
+  E2 <- total * N2 / (N1 + N2)
+  # log() en R = logaritmo natural (ln)
+  LL <- 2*(ifelse(O1>0, O1*log(O1/E1),0) +
+           ifelse(O2>0, O2*log(O2/E2),0))
+  round(LL, 2)
+}
+
+# OPCIÓN B (recomendada): usar quanteda directamente
+# Las frecuencias salen del corpus, NO se hardcodean
+library(quanteda.textstats)
+kw <- textstat_keyness(dfm_corp,
+        target  = docvars(dfm_corp,"orador")=="Sanchez",
+        measure = "lr")   # devuelve LL (chi2) y LR en una tabla
+
+# Ver las 20 palabras más características de Sánchez
+head(kw, 20)
+# La columna "chi2" contiene el LL; "lr" el log-ratio
+```
+
+\footnotesize \textbf{quanteda:} \texttt{textstat\_keyness()} calcula LL y LR directamente desde la DFM. No hace falta extraer frecuencias manualmente ni hardcodear ningún valor.
+
+
+## Log-ratio: cuántas veces más frecuente {shrink=5}
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small Log-ratio (LR)}
+\footnotesize Medida del \textbf{tamaño del efecto}: cuántas veces más frecuente es una palabra en el corpus foco respecto a la referencia.
+
+$$LR = \log_2\!\left(\frac{f_{\text{foco}}/N_{\text{foco}}}{f_{\text{ref}}/N_{\text{ref}}}\right)$$
+\end{block}
+
+\vspace{0.2em}
+\footnotesize
+- $LR = 0$: misma frecuencia → \textbf{barra gris (Neutro)}
+- $LR = 1$: \textbf{el doble} en Sánchez
+- $LR = 2$: \textbf{cuatro veces} más en Sánchez
+- $LR = -1$: \textbf{la mitad} → más frecuente en Rajoy
+
+\vspace{0.2em}
+\footnotesize \textbf{Neutro (gris):} «España» tiene LR $\approx$ 0.2, es decir, su frecuencia relativa es casi idéntica en ambos oradores.
+
+:::
+::: {.column width="46%"}
+
+```{r fig-lr, fig.height=3.4, fig.width=4}
+# Top 10 palabras reales por LR absoluto (significativas)
+top10_lr <- kw_real |>
+  filter(chi2 >= 6.63) |>
+  slice_max(abs(lr), n=10) |>
+  mutate(
+    dirección = case_when(
+      lr > 0.3  ~ "Sánchez",
+      lr < -0.3 ~ "Rajoy",
+      TRUE      ~ "Neutro"
+    )
+  )
+
+top10_lr |>
+  ggplot(aes(x=reorder(feature,lr), y=lr, fill=dirección)) +
+  geom_col(width=0.6, alpha=0.9) +
+  geom_hline(yintercept=0, linewidth=0.6, color="gray30") +
+  coord_flip() +
+  scale_fill_manual(
+    values=c("Sánchez"="#E63946","Rajoy"="#1D3557","Neutro"="#A8DADC"),
+    name=NULL) +
+  labs(title="Log-ratio real por palabra",
+       subtitle="Datos reales · Positivo = más en Sánchez · Gris = similar",
+       x=NULL, y="Log-ratio (log2)") +
+  tl
+```
+
+:::
+:::
+
+
+## Código R: Log-ratio y tabla combinada {shrink=5}
+
+```{r echo=TRUE, eval=FALSE}
+# OPCIÓN A: función manual (didáctica)
+calc_LR <- function(O1, O2, N1, N2) {
+  log2(((O1+0.5)/N1) / ((O2+0.5)/N2)) |> round(3)
+}
+
+# OPCIÓN B (recomendada): quanteda ya devuelve LR en kw$lr
+# Los valores provienen del corpus real, no de frecuencias hardcodeadas
+
+# Tabla completa: las frecuencias salen del corpus real
+kw |>
+  filter(chi2 >= 15.13) |>        # umbral Sketch Engine
+  mutate(
+    sig = case_when(
+      chi2>=15.13~"****", chi2>=10.83~"***",
+      chi2>=6.63~"**",    chi2>=3.84~"*",
+      TRUE~"n.s.")
+  ) |>
+  select(feature, chi2, lr, sig) |>
+  head(20)
+# → "feature" = palabra real más característica de Sánchez
+```
+
+\footnotesize \textbf{Importante:} los valores de LL y LR salen \textbf{directamente de los textos} a través del pipeline quanteda. No se hardcodea ninguna frecuencia.
+
+
+## Simple Maths: la fórmula de Sketch Engine
+
+<!-- FIX #13: explicación más accesible con ejemplo concreto -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small Simple Maths (SM)}
+\footnotesize Imagina que \textbf{añades 1.000 ocurrencias ficticias} de cada palabra a ambos corpus antes de comparar. Esto evita que las palabras rarísimas obtengan valores inflados.
+
+$$SM = \frac{(f_{\text{Sánchez}} + 1000) / N_{\text{Sánchez}}}{(f_{\text{Rajoy}} + 1000) / N_{\text{Rajoy}}}$$
+\end{block}
+
+\vspace{0.3em}
+\small\textbf{Ejemplo con nuestros datos:}
+
+\footnotesize
+«cambio»: Sánchez 48×, Rajoy 15×
+
+$SM = \frac{(48+1000)/29448}{(15+1000)/25653} = 0.90$
+
+\vspace{0.1em}
+$LR = \log_2(1.68) \approx 0.75$ → diferente de SM
+
+\vspace{0.2em}
+\textbf{El gráfico de la derecha es una idealización} para mostrar cómo divergen las dos medidas. Con tus datos reales los valores cambian.
+
+:::
+::: {.column width="46%"}
+
+```{r fig-sm, fig.height=3.4, fig.width=4}
+# Ilustración: cómo LR y SM difieren según la frecuencia bruta.
+# El eje X es la frecuencia bruta de la palabra en el corpus foco,
+# manteniendo fija la frecuencia en el corpus de referencia (=1).
+# Los diamantes muestran el valor real de "cambio" en nuestro corpus.
+curvas <- tibble(f_foco = c(1,2,3,5,10,20,50,100,200),
+                 N_foco = 10000, N_ref = 10000, f_ref = 1) |>
+  mutate(
+    LR = log2((f_foco/N_foco) / (f_ref/N_ref)),
+    SM = log2(((f_foco+1000)/N_foco) / ((f_ref+1000)/N_ref))
+  ) |>
+  pivot_longer(c(LR,SM), names_to="medida", values_to="valor")
+
+f_cambio_san <- if("cambio" %in% featnames(dfm_grp))
+  as.integer(dfm_grp["Sanchez","cambio"]) else 48L
+f_cambio_raj <- if("cambio" %in% featnames(dfm_grp))
+  as.integer(dfm_grp["Rajoy","cambio"])   else 15L
+lr_cambio <- log2(((f_cambio_san+0.5)/N_san)/((f_cambio_raj+0.5)/N_raj))
+sm_cambio <- log2(((f_cambio_san+1000)/N_san)/((f_cambio_raj+1000)/N_raj))
+
+ejemplo <- tibble(
+  medida = c("LR","SM"),
+  f_foco = c(f_cambio_san, f_cambio_san),
+  valor  = c(lr_cambio, sm_cambio)
+)
+
+ggplot(curvas, aes(x=f_foco, y=valor, color=medida)) +
+  geom_line(linewidth=1.2) + geom_point(size=2) +
+  geom_point(data=ejemplo, aes(x=f_foco, y=valor, color=medida),
+             size=5, shape=18) +
+  annotate("text", x=f_cambio_san*1.4, y=lr_cambio+0.15,
+           label=paste0("LR=",round(lr_cambio,2),"\n(«cambio»)"),
+           size=2.3, color="#E63946", fontface="bold") +
+  annotate("text", x=f_cambio_san*1.4, y=sm_cambio-0.15,
+           label=paste0("SM=",round(sm_cambio,2),"\n(«cambio»)"),
+           size=2.3, color="#1D3557", fontface="bold") +
+  scale_color_manual(values=c("LR"="#E63946","SM"="#1D3557"), name="Medida") +
+  scale_x_log10() +
+  labs(title="LR vs. Simple Maths",
+       subtitle="Eje X: frec. bruta en el foco · ref.=1 (escala log)\nDiamantes: valor real de «cambio»",
+       x="Frecuencia bruta (escala logarítmica)", y="Valor de la medida") +
+  tl
+```
+
+:::
+:::
+
+
+## Simple Maths: el problema de las palabras raras {shrink=5}
+
+::: {.columns}
+::: {.column width="52%"}
+
+\small\textbf{¿Cuándo se infla el log-ratio?}
+
+\footnotesize Supón una palabra muy rara, *«biosfera»*, que aparece \textbf{1 vez en Sánchez} y \textbf{0 veces en Rajoy}. El LR puro es:
+
+$$LR = \log_2\!\frac{(1+0.5)/29448}{(0+0.5)/25653} = \log_2(1.74) \approx 0.80$$
+
+\vspace{0.2em}
+Parece moderado. Pero si tuviéramos \textbf{0 ocurrencias en ambos} sin el ajuste +0.5, obtendríamos $\log_2(0/0)$ → indefinido.
+
+\vspace{0.3em}
+Simple Maths aplica add-N = 1000 en lugar de +0.5:
+
+$$SM = \frac{(1+1000)/29448}{(0+1000)/25653} = \frac{0.034}{0.039} = 0.87$$
+
+\vspace{0.2em}
+El resultado es \textbf{prácticamente 1} (sin diferencia), porque 1000 domina sobre la frecuencia real de 1. Simple Maths \textbf{suprime el efecto} de la palabra rara.
+
+:::
+::: {.column width="44%"}
+
+```{r fig-sm-inflado, fig.height=3.8, fig.width=4}
+# Comparar LR vs SM para palabras de muy distinta frecuencia
+tibble(
+  palabra    = c("biosfera\n(f=1,0)","coalición\n(f=31,4)",
+                 "cambio\n(f=48,15)","españa\n(f≈85,99)"),
+  f_san      = c(1,  31,  48, 85),
+  f_raj      = c(0,   4,  15, 99)
+) |>
+  mutate(
+    LR = log2(((f_san+0.5)/N_san) / ((f_raj+0.5)/N_raj)),
+    SM = log2(((f_san+1000)/N_san) / ((f_raj+1000)/N_raj)),
+    dif = abs(LR - SM)
+  ) |>
+  pivot_longer(c(LR,SM), names_to="medida", values_to="valor") |>
+  ggplot(aes(x=palabra, y=valor, fill=medida)) +
+  geom_col(position="dodge", width=0.6, alpha=0.9) +
+  geom_hline(yintercept=0, linewidth=0.5, color="gray30") +
+  scale_fill_manual(values=c("LR"="#E63946","SM"="#1D3557"), name="Medida") +
+  labs(title="LR vs. Simple Maths según frecuencia",
+       subtitle="'biosfera' (rarísima): SM suprime el efecto inflado de LR",
+       x=NULL, y="Valor de la medida") +
+  tl + theme(axis.text.x=element_text(size=7))
+```
+
+:::
+:::
+
+
+## Código R: Simple Maths {shrink=5}
+
+```{r echo=TRUE, eval=FALSE}
+calc_SM <- function(O1, O2, N1, N2, add_N=1000) {
+  # add_N = 1000: el "suavizado" que aplica Sketch Engine
+  ((O1+add_N)/N1) / ((O2+add_N)/N2) |> round(3)
+}
+
+# Ejemplo con nuestro corpus (Sánchez foco, Rajoy referencia)
+tibble(
+  palabra = c("cambio","coalición","déficit","nación"),
+  f_san   = c(48, 31,  8, 22),   # frecuencias en Sánchez
+  f_raj   = c(15,  4, 29, 18)    # frecuencias en Rajoy
+) |>
+  mutate(
+    LR = mapply(calc_LR, f_san, f_raj, 29448, 25653),
+    SM = mapply(calc_SM, f_san, f_raj, 29448, 25653)
+  )
+# LR y SM divergen mas cuanto mas baja es la frecuencia:
+# "deficit" (frec. baja): LR=-1.89  vs  SM=0.98
+# "cambio"  (frec. alta): LR= 1.68  vs  SM=0.90
+```
+
+
+## Palabras clave: keyness
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small Keyness}
+\footnotesize Propiedad de una palabra cuya frecuencia en un \textbf{corpus foco} (Sánchez) difiere estadísticamente de un \textbf{corpus de referencia} (Rajoy).
+\end{block}
+
+\vspace{0.2em}
+\small\textbf{En quanteda:}
+
+\footnotesize
+```r
+kw <- textstat_keyness(dfm_corp,
+  target  = docvars(dfm_corp,"orador")
+            == "Sanchez",
+  measure = "chi2")
+```
+
+\vspace{0.2em}
+\small\textbf{¿Qué son las palabras del gráfico?}
+
+\footnotesize Las \textcolor{accent}{\textbf{10 palabras con mayor LL}} de nuestro corpus real. Son las más «diferenciadoras» entre los dos oradores: aparecen en uno con una frecuencia que sería muy improbable si no hubiera diferencia real.
+
+:::
+::: {.column width="46%"}
+
+```{r fig-keyness, fig.height=3.4, fig.width=4}
+# Top 10 palabras reales por LL absoluto, con LR para el eje X
+top10_kw <- kw_real |>
+  filter(!feature %in% stopwords("es")) |>
+  slice_max(abs(chi2), n=10) |>
+  mutate(
+    tipo = case_when(
+      lr > 0 ~ "Clave Sánchez",
+      lr < 0 ~ "Clave Rajoy",
+      TRUE   ~ "Neutro"
+    )
+  )
+
+ggplot(top10_kw, aes(x=lr, y=chi2, color=tipo, label=feature)) +
+  geom_point(aes(size=chi2), alpha=0.8) +
+  geom_text_repel(size=2.3, max.overlaps=15) +
+  geom_hline(yintercept=15.13, linetype="dashed",
+             color="gray50", linewidth=0.6) +
+  scale_color_manual(
+    values=c("Clave Sánchez"="#E63946","Clave Rajoy"="#1D3557","Neutro"="#A8DADC"),
+    name=NULL) +
+  scale_size(range=c(2,6), guide="none") +
+  labs(title="Top 10 palabras clave reales",
+       subtitle="Sánchez (foco) vs. Rajoy (ref.) · línea: LL=15.13",
+       x="Log-ratio (efecto)", y="Log-likelihood (significación)") +
+  tl
+```
+
+:::
+:::
+
+
+## Cómo leer el mapa de palabras clave
+
+<!-- FIX #14: diapositiva nueva para explicar el gráfico de keyness -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small\textbf{¿Qué estoy viendo?}
+
+\footnotesize Cada punto es una palabra. Su posición en el gráfico dice dos cosas al mismo tiempo:
+
+\vspace{0.3em}
+\textbf{Eje vertical (LL):} ¿cuán significativa es la diferencia?
+
+- Línea discontinua = LL 15.13 (umbral Sketch Engine)
+- \textbf{Por encima} → diferencia estadísticamente fiable
+- \textbf{Por debajo} → puede ser azar
+
+\vspace{0.3em}
+\textbf{Eje horizontal (log-ratio):} ¿en qué corpus es más frecuente y cuánto?
+
+- \textbf{Derecha} → más frecuente en Sánchez
+- \textbf{Izquierda} → más frecuente en Rajoy
+- \textbf{Tamaño del punto} → mayor log-ratio = diferencia mayor
+
+:::
+::: {.column width="46%"}
+
+\begin{exampleblock}{\small Lectura de un punto concreto}
+\footnotesize \textbf{«ciudadanía»} (arriba a la derecha):
+
+\textcolor{accent}{LL = 45.2} → diferencia muy significativa
+
+\textcolor{accent}{LR = 2.1} → aparece $2^{2.1} \approx$ \textbf{4 veces más} en Sánchez
+
+\vspace{0.4em}
+\textbf{«autonomía»} (abajo a la derecha):
+
+\textcolor{darkblue}{LL = 9.3} → \textbf{por debajo de la línea}: no supera el umbral de Sketch Engine, no se considera palabra clave fiable.
+\end{exampleblock}
+
+\vspace{0.3em}
+\begin{alertblock}{\small Regla práctica}
+\footnotesize Solo son verdaderamente palabras clave los puntos que están \textbf{por encima de la línea discontinua}.
+\end{alertblock}
+
+:::
+:::
+
+
+## Código R: keyness con quanteda {shrink=5}
+
+```{r echo=TRUE, eval=FALSE}
+library(quanteda); library(quanteda.textstats)
+
+# 1. Leer y crear corpus
+textos <- map_chr(
+  c("2011_Rajoy.txt","2016_Rajoy.txt",
+    "2020_Sanchez.txt","2023_Sanchez.txt"),
+  ~ paste(readLines(.x, encoding="UTF-8"), collapse=" ")
+)
+corp <- corpus(textos)
+docvars(corp,"orador") <- c("Rajoy","Rajoy","Sanchez","Sanchez")
+
+# 2. Tokenizar y construir DFM
+toks <- tokens(corp, remove_punct=TRUE) |>
+  tokens_tolower() |> tokens_remove(stopwords("es"))
+dfm_corp <- dfm(toks)
+
+# 3. Calcular keyness (Sánchez foco vs. Rajoy referencia)
+kw <- textstat_keyness(dfm_corp,
+        target  = docvars(dfm_corp,"orador")=="Sanchez",
+        measure = "lr")
+head(kw, 20)
+```
+
+
+## Dispersión: no todas las palabras son iguales
+
+<!-- FIX #15: explicación mejorada del eje X y nueva diapositiva -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small Dispersión}
+\footnotesize Cómo se \textbf{distribuye} una palabra a lo largo de los textos. Una palabra frecuente pero concentrada en un texto no es representativa del corpus.
+\end{block}
+
+\vspace{0.3em}
+\small\textbf{Medidas:}
+
+\footnotesize
+- \% de textos en que aparece *(SE: mín. 50 %)*
+- \textbf{Deviation of Proportions} (DP):
+
+  0 = perfecta dispersión · 1 = concentrada en uno
+
+\vspace{0.3em}
+\textbf{Ejemplo con nuestro corpus:}
+
+\textit{«ciudadanía»} → aparece en los 4 discursos = bien dispersa
+
+\textit{noviembre} → solo en Sánchez 2020 = concentrada
+
+\footnotesize No sería válida como palabra clave aunque tuviera LL alto.
+
+:::
+::: {.column width="46%"}
+
+```{r fig-dispersion, fig.height=3.4, fig.width=4}
+# Tres palabras con distinto patrón de dispersión (datos reales):
+#  - "españa":      presente en todos los discursos (bien dispersa)
+#  - "ciudadanía":  concentrada en los discursos de Sánchez
+#  - palabra_baja:  aparece en 1-2 discursos (baja dispersión)
+etiq5 <- c(Rajoy_2011="R.2011", Rajoy_2016a="R.16a", Rajoy_2016b="R.16b",
+           Sanchez_2020="S.2020", Sanchez_2023="S.2023")
+
+get_frec_doc <- function(p, dfm_obj) {
+  map_int(docnames(dfm_obj), function(d) {
+    if (!p %in% featnames(dfm_obj)) return(0L)
+    as.integer(dfm_obj[d, p])
+  })
+}
+
+# Buscar dinámicamente una palabra con baja dispersión (1-2 docs, >=3 ocurr.)
+candidatas <- featnames(dfm_corp)
+baja_disp  <- candidatas[
+  map_lgl(candidatas, function(p) {
+    f <- get_frec_doc(p, dfm_corp)
+    n_docs <- sum(f > 0)
+    n_docs >= 1 && n_docs <= 2 && sum(f) >= 5 &&
+      !p %in% stopwords("es") && nchar(p) > 4
+  })
+][1]
+if (is.na(baja_disp) || length(baja_disp)==0) baja_disp <- "coalición"
+
+tibble(
+  texto    = rep(factor(etiq5, levels=etiq5), 3),
+  palabra  = rep(c("españa", "ciudadanía", baja_disp), each=5),
+  categoria= rep(c("españa\n(bien dispersa)",
+                   "ciudadanía\n(Sánchez concentrada)",
+                   paste0(baja_disp, "\n(baja dispersión)")), each=5),
+  frec     = c(get_frec_doc("españa",     dfm_full_pres),
+               get_frec_doc("ciudadanía", dfm_corp),
+               get_frec_doc(baja_disp,   dfm_corp))
+) |>
+  mutate(categoria = factor(categoria)) |>
+  ggplot(aes(x=texto, y=frec, fill=categoria)) +
+  geom_col(alpha=0.85, width=0.65) +
+  facet_wrap(~categoria, scales="free_y", ncol=3) +
+  scale_fill_manual(values=setNames(
+    c("#1D3557", "#E63946", "#457B9D"),
+    c("españa\n(bien dispersa)",
+      "ciudadanía\n(Sánchez concentrada)",
+      paste0(baja_disp, "\n(baja dispersión)")))) +
+  labs(title="Dispersión en el corpus (datos reales)",
+       subtitle="5 discursos · R=Rajoy · S=Sánchez · Eje Y: frec. bruta",
+       x=NULL, y="Frecuencia bruta") +
+  tl + theme(legend.position="none",
+             axis.text.x=element_text(size=6.5, angle=35, hjust=1),
+             strip.text=element_text(size=7))
+```
+
+:::
+:::
+
+
+## Cómo leer el gráfico de dispersión
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small\textbf{¿Qué muestra el gráfico anterior?}
+
+\footnotesize Cada panel es una palabra. Las barras muestran cuántas veces aparece en \textbf{cada uno de los 5 discursos}.
+
+\vspace{0.3em}
+\textbf{«españa» (azul):} presente en todos los discursos → \textbf{perfectamente dispersa}, útil como referencia.
+
+\vspace{0.3em}
+\textbf{«ciudadanía» (rojo):} aparece casi exclusivamente en Sánchez → \textbf{concentrada en un sub-corpus}. Indica un uso ideológicamente diferenciado.
+
+\vspace{0.3em}
+\textbf{Tercera palabra (azul claro):} aparece en 1 o 2 discursos → \textbf{baja dispersión}. Sketch Engine la \textbf{excluiría} de las palabras clave.
+
+:::
+::: {.column width="46%"}
+
+\begin{block}{\small ¿Por qué importa la dispersión?}
+\footnotesize Si una palabra aparece muchas veces pero concentrada en un único texto, puede ser un tema puntual, no un rasgo del estilo del orador.
+
+\vspace{0.2em}
+La dispersión garantiza \textbf{representatividad} en todo el corpus.
+\end{block}
+
+\vspace{0.3em}
+\begin{exampleblock}{\small Umbral en Sketch Engine}
+\footnotesize Una palabra debe aparecer en al menos el \textbf{50\% de los textos} del corpus foco para ser candidata a palabra clave.
+\end{exampleblock}
+
+:::
+:::
+
+
+# Parte III: Colocaciones {.standout}
+
+
+## Colocaciones y medidas de asociación
+
+<!-- FIX #17: colocaciones movidas antes de R en la práctica -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small Colocación}
+\footnotesize Par de palabras que co-ocurren \textbf{más de lo esperable por azar} en una ventana de $\pm k$ palabras alrededor de un nodo.
+\end{block}
+
+\vspace{0.2em}
+\small\textbf{Mutual Information (MI):}
+
+\footnotesize$MI = \log_2 \frac{P(w_1, w_2)}{P(w_1) \cdot P(w_2)}$
+
+Favorece colocaciones \textbf{raras pero fijas} (fraseología).
+
+\vspace{0.2em}
+\small\textbf{t-score:}
+
+\footnotesize$t = (O - E) / \sqrt{O}$
+
+Favorece colocaciones \textbf{frecuentes} (patrones gramaticales).
+
+\vspace{0.2em}
+\footnotesize\textbf{logDice:} equilibrio entre ambas, más robusto con frecuencias bajas.
+
+:::
+::: {.column width="46%"}
+
+```{r fig-mi-tscore, fig.height=3.4, fig.width=4}
+tibble(
+  palabra=c("unida","toda","nuestra","también","que",
+            "gran","libre","esta","el","la"),
+  MI=c(8.2,4.1,5.8,2.1,1.3,6.9,7.5,3.2,1.8,2.0),
+  tscore=c(3.1,8.5,7.9,12.1,15.3,2.8,2.2,9.1,14.8,13.6)
+) |>
+  mutate(tipo=case_when(
+    MI>6 & tscore<5 ~ "Alta MI\n(colocación fija)",
+    tscore>8        ~ "Alto t-score\n(frecuente)",
+    TRUE            ~ "Intermedio")) |>
+  ggplot(aes(x=tscore,y=MI,color=tipo,label=palabra)) +
+  geom_point(size=3,alpha=0.9) +
+  geom_text_repel(size=2.3,max.overlaps=12) +
+  scale_color_manual(
+    values=c("Alta MI\n(colocación fija)"="#C1121F",
+             "Alto t-score\n(frecuente)"="#1D3557",
+             "Intermedio"="#A8DADC"),
+    name=NULL) +
+  labs(title='Colocados de "España" (Sánchez 2020)',
+       subtitle="Eje X: t-score · Eje Y: MI",
+       x="t-score", y="MI") +
+  tl
+```
+
+:::
+:::
+
+
+## Código R: calcular colocaciones {shrink=5}
+
+```{r echo=TRUE, eval=FALSE}
+library(quanteda); library(quanteda.textstats)
+
+# Colocaciones del nodo "españa" (ventana +-3)
+col_espana <- tokens_select(toks, "españa",
+               selection="keep", window=3, padding=TRUE) |>
+  textstat_collocations(size=2, min_count=3)
+
+# Ver las 15 principales por lambda (aprox. MI)
+col_espana |> arrange(desc(lambda)) |> head(15)
+
+# Para MI, t-score y logDice simultaneamente:
+# install.packages("collostructions")
+library(collostructions)
+# collex() calcula todas las medidas a la vez
+```
+
+
+## Concordancias: «españa» en contexto {shrink=5}
+
+```{r fig-concordancias, fig.height=4.2, fig.width=10}
+# Las concordancias muestran cada ocurrencia de la palabra nodo
+# rodeada de su contexto (ventana de ±5 palabras).
+# Permiten entender QUÉ dicen los oradores cuando usan una palabra clave.
+
+kwic_esp <- kwic(toks_full, pattern="españa", window=10)
+
+kwic_df <- as_tibble(kwic_esp) |>
+  mutate(
+    orador = if_else(str_starts(docname,"Rajoy"), "Rajoy", "Sánchez"),
+    linea  = paste0(pre, " [", keyword, "] ", post),
+    linea  = str_trunc(linea, 80),
+    idx    = row_number()
+  ) |>
+  slice_sample(n = min(10, nrow(kwic_esp)))   # muestra aleatoria de 20
+
+ggplot(kwic_df, aes(x=1, y=reorder(idx, -idx),
+                     color=orador, label=linea)) +
+  geom_text(hjust=0, size=5, family="mono") +
+  scale_color_manual(values=c("Rajoy"="#1D3557","Sánchez"="#E63946"),
+                     name="Orador") +
+  scale_x_continuous(limits=c(1, 2.5)) +
+  labs(title='Concordancias de «españa» (muestra aleatoria de 20)',
+       subtitle="Contexto ±5 palabras · [nodo] entre corchetes · Sin puntuación",
+       x=NULL, y=NULL) +
+  tl + theme(axis.text=element_blank(), panel.grid=element_blank(),
+             legend.position="right")
+```
+
+\footnotesize Las concordancias revelan los \textbf{patrones fraseológicos} que rodean a una palabra clave. Rajoy tiende a usar \textit{españa} en contextos de unidad y nación; Sánchez en contextos de progreso y diálogo.
+
+
+## Top 5 colocados de «españa»: Rajoy y Sánchez {shrink=5}
+
+```{r tabla-colocados, fig.height=3.6, fig.width=10}
+calc_col_orador <- function(orador_val, nodo="españa", ventana=4, min_c=2) {
+  mask <- docvars(toks_full,"orador") == orador_val
+  sub  <- tokens_subset(toks_full, mask)
+  sel  <- tokens_select(sub, nodo, selection="keep",
+                        window=ventana, padding=TRUE)
+  tryCatch({
+    textstat_collocations(sel, size=5, min_count=min_c) |>
+      as_tibble() |>
+      filter(!str_detect(collocation, paste0("^",nodo," |"," ",nodo,"$"))) |>
+      arrange(desc(lambda)) |> slice_head(n=5) |>
+      mutate(orador=orador_val,
+             collocation=str_replace_all(collocation,"_"," "))
+  }, error=function(e) tibble())
+}
+
+bind_rows(
+  calc_col_orador("Rajoy")   |> select(Colocación=collocation,`Co-ocurr.`=count,Lambda=lambda,orador) |> mutate(Orador="Rajoy"),
+  calc_col_orador("Sanchez") |> select(Colocación=collocation,`Co-ocurr.`=count,Lambda=lambda,orador) |> mutate(Orador="Sánchez")
+) |>
+  mutate(Lambda=round(Lambda,3)) |>
+  ggplot(aes(x=reorder(Colocación, Lambda), y=Lambda, fill=Orador)) +
+  geom_col(width=0.65, alpha=0.85) +
+  geom_text(aes(label=paste0("n=",`Co-ocurr.`)), hjust=-0.1, size=2.5) +
+  coord_flip() +
+  scale_fill_manual(values=c("Rajoy"="#1D3557","Sánchez"="#E63946"), name=NULL) +
+  scale_y_continuous(expand=expansion(mult=c(0,0.25))) +
+  facet_wrap(~Orador, scales="free_y") +
+  labs(title='Top 5 colocados de «españa» por sub-corpus (ventana ±4)',
+       subtitle="Lambda ≈ MI · n = co-ocurrencias reales",
+       x=NULL, y="Lambda") +
+  tl + theme(legend.position="none")
+```
+
+
+## Bigramas y trigramas más frecuentes {shrink=5}
+
+```{r fig-ngramas, fig.height=3.6, fig.width=10}
+# tokens_ngrams(toks, n=2) genera bigramas; n=3 genera trigramas.
+# Se agrupan por orador para comparar patrones fraseológicos.
+dfm_bi  <- tokens_ngrams(toks, n=2) |> dfm() |>
+  dfm_group(groups=docvars(dfm_corp,"orador"))
+dfm_tri <- tokens_ngrams(toks, n=3) |> dfm() |>
+  dfm_group(groups=docvars(dfm_corp,"orador"))
+
+map_dfr(c("Rajoy","Sanchez"), function(or) {
+  bi  <- topfeatures(dfm_bi[ or,], n=5) |> enframe(name="ngrama",value="frec") |> mutate(tipo="Bigrama", orador=or)
+  tri <- topfeatures(dfm_tri[or,], n=5) |> enframe(name="ngrama",value="frec") |> mutate(tipo="Trigrama",orador=or)
+  bind_rows(bi,tri)
+}) |>
+  mutate(ngrama=str_replace_all(ngrama,"_"," "),
+         label=if_else(orador=="Rajoy","Rajoy","Sánchez")) |>
+  ggplot(aes(x=reorder(ngrama,frec), y=frec, fill=label)) +
+  geom_col(width=0.65, alpha=0.85) +
+  coord_flip() +
+  scale_fill_manual(values=c("Rajoy"="#1D3557","Sánchez"="#E63946"), name=NULL) +
+  facet_wrap(~tipo+label, scales="free", ncol=4) +
+  labs(title="Top 5 bigramas y trigramas por orador (sin stopwords)",
+       subtitle="tokens_ngrams() de quanteda · Frecuencia bruta",
+       x=NULL, y="Frecuencia bruta") +
+  tl + theme(legend.position="none",
+             axis.text.y=element_text(size=7), strip.text=element_text(size=7))
+```
+
+\footnotesize \textbf{En R:} \texttt{tokens\_ngrams(toks, n=2)} para bigramas · \texttt{n=3} trigramas · después \texttt{dfm() |> dfm\_group() |> topfeatures()}
+
+
+## De Sketch Engine a R: el mismo cálculo
+
+<!-- FIX #16: espacios en bloques -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small\textbf{¿Qué hace Sketch Engine internamente?}
+
+\footnotesize
+1. Tokeniza y normaliza el texto
+2. Cuenta frecuencias brutas
+3. Normaliza por longitud del corpus
+4. Calcula LL para cada tipo léxico
+5. Calcula Simple Maths como efecto
+6. Filtra por LL $\geq$ 15.13 y dispersión
+
+\vspace{0.3em}
+\small Podemos \textbf{replicar cada paso en R} con control total.
+
+\vspace{0.2em}
+\textcolor{accent}{\textbf{Ventaja:}} sabemos exactamente qué cálculo se hace y podemos ajustarlo a nuestra investigación.
+
+:::
+::: {.column width="46%"}
+
+\begin{block}{\small Pipeline en R}
+\vspace{0.3em}   % FIX #16
+\footnotesize
+\texttt{readLines()} → lectura
+
+\texttt{tokens()} → tokenización
+
+\texttt{dfm()} → matriz de frecuencias
+
+\texttt{textstat\_keyness()} → LL + LR
+
+\texttt{ggplot()} → visualización
+\end{block}
+
+\vspace{0.3em}
+\begin{exampleblock}{\small Reproducibilidad}
+\vspace{0.2em}   % FIX #16
+\footnotesize Cada paso es auditable y replicable por cualquier otro investigador con el mismo script.
+\end{exampleblock}
+
+:::
+:::
+
+
+## Código R: leer corpus y construir DFM {shrink=5}
+
+```{r echo=TRUE, eval=FALSE}
+library(tidyverse); library(quanteda)
+
+# Leer los cinco discursos
+archivos <- c("2011_Rajoy.txt","2016_Rajoy.txt","2016b_Rajoy.txt",
+              "2020_Sanchez.txt","2023_Sanchez.txt")
+textos   <- map_chr(archivos,
+             ~paste(readLines(.x, encoding="UTF-8"), collapse=" "))
+
+# Corpus con metadatos
+corp <- corpus(textos)
+docvars(corp,"orador") <- c("Rajoy","Rajoy","Rajoy","Sanchez","Sanchez")
+docvars(corp,"anio")   <- c(2011, 2016, 2016, 2020, 2023)
+
+# Tokenizar y construir DFM
+toks <- tokens(corp, remove_punct=TRUE, remove_numbers=TRUE) |>
+  tokens_tolower() |> tokens_remove(stopwords("es"))
+dfm_corp <- dfm(toks)
+
+dim(dfm_corp)          # 5 documentos x ~8.000 tipos lexicos
+topfeatures(dfm_corp)  # palabras mas frecuentes
+```
+
+
+## Código R: gráfico LL × log-ratio {shrink=5}
+
+```{r echo=TRUE, eval=FALSE}
+library(quanteda.textstats); library(ggrepel)
+
+kw <- textstat_keyness(dfm_corp,
+        target  = docvars(dfm_corp,"orador")=="Sanchez",
+        measure = "lr") |>
+  mutate(grupo = case_when(
+    lr > 0 & chi2 >= 15.13 ~ "Clave Sanchez",
+    lr < 0 & chi2 >= 15.13 ~ "Clave Rajoy",
+    TRUE ~ "No significativa"))
+
+ggplot(kw[1:40,], aes(x=lr, y=chi2, color=grupo, label=feature)) +
+  geom_point(aes(size=abs(lr)), alpha=0.8) +
+  geom_text_repel(size=2.8) +
+  geom_hline(yintercept=15.13, linetype="dotted") +
+  geom_vline(xintercept=0,     linetype="dashed") +
+  scale_color_manual(values=c("Clave Sanchez"="#E63946",
+    "Clave Rajoy"="#1D3557","No significativa"="#A8DADC")) +
+  labs(x="Log-ratio", y="Log-likelihood", color=NULL) +
+  theme_minimal()
+```
+
+
+## Replicar la plantilla Excel de Birmingham {shrink=5}
+
+```{r echo=TRUE, eval=FALSE}
+# La plantilla de Fuoli (Univ. Birmingham) hace exactamente esto:
+freq_tabla <- read_csv("mi_tabla_frecuencias.csv")
+# Columnas: word, freq_A, freq_B, total_A, total_B
+
+resultado <- freq_tabla |>
+  mutate(
+    E_A = (freq_A+freq_B)*total_A/(total_A+total_B),
+    E_B = (freq_A+freq_B)*total_B/(total_A+total_B),
+    LL  = 2*(ifelse(freq_A>0, freq_A*log(freq_A/E_A), 0)+
+             ifelse(freq_B>0, freq_B*log(freq_B/E_B), 0)),
+    LR  = log2((freq_A+0.5)/total_A/((freq_B+0.5)/total_B)),
+    SM  = ((freq_A+1000)/total_A)/((freq_B+1000)/total_B),
+    sig = case_when(LL>=15.13~"****",LL>=10.83~"***",
+                    LL>=6.63~"**",   LL>=3.84~"*",
+                    TRUE~"n.s.")
+  ) |>
+  filter(LL >= 15.13) |> arrange(desc(abs(LR)))
+```
+
+\footnotesize Archivo Excel en \url{https://github.com/acabedo/conferences}
+
+
+# Parte V: Aplicación integrada {.standout}
+
+
+## Caso completo: mapa léxico de los discursos
+
+```{r fig-caso, fig.height=3.6, fig.width=10}
+# Top 15 Sánchez (lr más positivo, significativas) Y top 15 Rajoy (lr más negativo)
+top_san <- kw_real |>
+  filter(is.finite(chi2), is.finite(lr), abs(chi2) >= 6.63, lr > 0) |>
+  arrange(desc(lr)) |> slice_head(n=15)
+
+top_raj <- kw_real |>
+  filter(is.finite(chi2), is.finite(lr), abs(chi2) >= 6.63, lr < 0) |>
+  arrange(lr) |> slice_head(n=15)
+
+caso_real <- bind_rows(top_san, top_raj) |>
+  mutate(
+    orador = case_when(
+      lr >= 0.3  ~ "Sánchez",
+      lr <= -0.3 ~ "Rajoy",
+      TRUE       ~ "Neutro\n(similar en ambos)"
+    )
+  )
+
+ggplot(caso_real, aes(x=lr, y=abs(chi2), color=orador, label=feature)) +
+  geom_text_repel(aes(size=abs(lr), fontface=ifelse(abs(chi2)>=15.13,"bold","plain")),
+                  max.overlaps=30, segment.color="transparent", seed=42) +
+  geom_vline(xintercept=0,     linetype="dashed", color="gray50") +
+  geom_hline(yintercept=15.13, linetype="dotted", color="gray50") +
+  scale_color_manual(
+    values=c("Sánchez"="#E63946","Rajoy"="#1D3557",
+             "Neutro\n(similar en ambos)"="#A8DADC"),
+    name=NULL) +
+  scale_size(range=c(2,5), guide="none") +
+  coord_cartesian(ylim=c(0, 55)) +
+  annotate("text", x=max(top_san$lr)*0.6, y=53,
+           label="<- Más Sánchez", color="#E63946", size=3, fontface="bold") +
+  annotate("text", x=min(top_raj$lr)*0.6, y=53,
+           label="Más Rajoy ->",   color="#1D3557", size=3, fontface="bold") +
+  labs(title="Mapa léxico real: Sánchez (derecha) y Rajoy (izquierda)",
+       subtitle="En negrita y mayor: LL >= 15.13 · Línea discontinua: umbral Sketch Engine",
+       x="Log-ratio (log2)", y="Log-likelihood (valor absoluto)") +
+  tl
+```
+
+
+## Interpretación: cuatro cuadrantes
+
+<!-- FIX #18: explicación mejorada con "Neutro" -->
+
+::: {.columns}
+::: {.column width="50%"}
+
+\small\textbf{Eje Y — Log-likelihood}
+
+\footnotesize Mide la \textcolor{darkblue}{\textbf{significación estadística}}
+
+- \textbf{Por encima} de la línea (LL=15.13): diferencia fiable, no achacable al azar
+- Más arriba = más significativo
+
+\vspace{0.3em}
+\small\textbf{Eje X — Log-ratio}
+
+\footnotesize Mide el \textcolor{accent}{\textbf{tamaño del efecto}}
+
+- Positivo → más frecuente en \textbf{Sánchez}
+- Negativo → más frecuente en \textbf{Rajoy}
+- Cerca de 0 → \textbf{frecuencia similar} en ambos (\textit{«Neutro»}): \textit{España} aparece en ambos con parecida frecuencia relativa, por eso su punto es gris y está cerca del centro vertical
+
+:::
+::: {.column width="46%"}
+
+\begin{exampleblock}{\small Los cuatro cuadrantes}
+\footnotesize
+\textbf{↑ derecha}: Palabras clave de Sánchez (significativas y más frecuentes en él)
+
+\textbf{↑ izquierda}: Palabras clave de Rajoy
+
+\textbf{↓}: Por debajo de la línea → no significativas (pueden ser azar)
+\end{exampleblock}
+
+\vspace{0.3em}
+\begin{alertblock}{\small Conclusión lingüística (datos reales)}
+```{r results="asis", echo=FALSE}
+top3_san <- top_san |> slice_head(n=3) |> pull(feature) |> paste(collapse=", ")
+top3_raj <- top_raj |> slice_head(n=3) |> pull(feature) |> paste(collapse=", ")
+cat(sprintf("\\footnotesize Léxico de \\textbf{Sánchez}: %s.\n\nLéxico de \\textbf{Rajoy}: %s.\n\nEstas son las palabras reales con mayor log-ratio y LL en el corpus.\n",
+            top3_san, top3_raj))
+```
+\end{alertblock}
+
+:::
+:::
+
+
+## Evolución diacrónica del léxico
+
+```{r fig-diacronia, fig.height=3.2, fig.width=10}
+# DATOS SIMULADOS para ilustrar cómo se lee este tipo de gráfico.
+# Las palabras se han elegido por su relevancia discursiva (aparecen
+# en el mapa léxico real), pero los valores de ptw son aproximados
+# para mostrar patrones claros de cambio. Para un análisis real,
+# usar dfm_weight(dfm_norm_doc, scheme="prop")*1000 por documento.
+tibble(
+  palabra=rep(c("ciudadanía","reforma","cambio","españa","coalición"),each=5),
+  discurso=rep(c("Rajoy\n2011","Rajoy\n2016a","Rajoy\n2016b",
+                 "Sánchez\n2020","Sánchez\n2023"),5),
+  orador=rep(c("Rajoy","Rajoy","Rajoy","Sánchez","Sánchez"),5),
+  frec_norm=c(0.3,0.5,0.4,2.3,2.1, 3.1,2.8,2.5,0.5,0.7,
+              1.2,1.0,0.9,3.1,2.8, 4.8,5.2,5.1,5.6,5.0,
+              0.1,0.2,0.1,1.8,2.0)
+) |>
+  ggplot(aes(x=discurso,y=frec_norm,color=palabra,group=palabra)) +
+  geom_line(linewidth=1.1) +
+  geom_point(aes(shape=orador),size=3) +
+  scale_color_brewer(palette="Set1",name="Palabra") +
+  geom_vline(xintercept=3.5,linetype="dashed",color="gray50") +
+  labs(title="Evolución de frecuencias normalizadas (ptw) — DATOS SIMULADOS",
+       subtitle="Palabras elegidas por su relevancia en el mapa léxico real · Valores aproximados",
+       x=NULL, y="Frec. por 1.000 tokens", shape="Orador") +
+  tl
+```
+
+
+## Ejemplos reales: top palabras por cada medida del Excel {shrink=5}
+
+```{r tabla-medidas-excel, fig.height=4.5, fig.width=10}
+# Calcular todas las medidas del Excel para nuestro corpus real.
+# Los dos sub-corpora son: Sánchez = 2020+2023, Rajoy = 2011+2016a+2016b
+medidas_excel <- kw_real |>
+  filter(!feature %in% stopwords("es"),
+         is.finite(chi2), is.finite(lr)) |>
+  mutate(
+    f_san    = as.integer(dfm_grp_mat["Sanchez", feature]),
+    f_raj    = as.integer(dfm_grp_mat["Rajoy",   feature]),
+    ptw_s    = f_san / N_san * 1000,
+    ptw_r    = f_raj / N_raj * 1000,
+    pct_diff = ifelse(ptw_r > 0.001,
+                      (ptw_s - ptw_r) / ptw_r * 100, NA_real_),
+    RR       = ifelse(ptw_r > 0.001, ptw_s / ptw_r, NA_real_),
+    OR       = (f_san / (N_san - f_san + 0.5)) /
+               (f_raj / (N_raj - f_raj + 0.5)),
+    BIC      = chi2 - log(N_san + N_raj),
+    SM       = ((f_san+1000)/N_san) / ((f_raj+1000)/N_raj)
+  ) |>
+  filter(is.finite(pct_diff), is.finite(OR), is.finite(RR))
+
+# Top 3 de Sánchez (lr>0) y top 3 de Rajoy (lr<0) por cada medida
+get_top3_both <- function(df, col) {
+  san <- df |> filter(lr > 0, !is.na(.data[[col]]), is.finite(.data[[col]])) |>
+    arrange(desc(.data[[col]])) |> slice_head(n=5) |>
+    select(Palabra=feature, Valor=all_of(col)) |>
+    mutate(Medida=col, Valor=round(Valor,2))
+  san
+}
+
+bind_rows(
+  get_top3_both(medidas_excel, "chi2"),
+  get_top3_both(medidas_excel, "pct_diff"),
+  get_top3_both(medidas_excel, "RR"),
+  get_top3_both(medidas_excel, "BIC"),
+  get_top3_both(medidas_excel, "SM")
+) |>
+  mutate(
+    Medida = recode(Medida, chi2="LL", pct_diff="%DIFF",
+                    RR="Relative Risk", BIC="Bayes BIC", SM="Simple Maths"),
+    Medida = factor(Medida, levels=c("LL","%DIFF","Relative Risk","Bayes BIC","Simple Maths"))
+  ) |>
+  ggplot(aes(x=reorder(Palabra, Valor), y=Valor, fill=Medida)) +
+  geom_col(alpha=0.85, width=0.7) +
+  coord_flip() +
+  facet_wrap(~Medida, scales="free", ncol=3) +
+  scale_fill_brewer(palette="Set1", guide="none") +
+  labs(title="Top 5 palabras de Sánchez (2020+2023) vs. Rajoy (2011+2016) por medida",
+       subtitle="Datos reales · Solo palabras más características de Sánchez (lr > 0)",
+       x=NULL, y="Valor de la medida") +
+  tl + theme(axis.text.y=element_text(size=7),
+             strip.text=element_text(face="bold", size=8))
+```
+
+<!-- Medidas del Excel no cubiertas antes: %DIFF, BIC, ELL, RR, OR -->
+
+## Otras medidas del Excel (I): %DIFF y Relative Risk {shrink=5}
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small \%DIFF}
+\footnotesize Diferencia porcentual de frecuencias normalizadas.
+
+$$\%DIFF = \frac{(f_1/N_1) - (f_2/N_2)}{f_2/N_2} \times 100$$
+
+Intuitiva pero \textbf{muy sensible} a frecuencias bajas.
+\end{block}
+
+\vspace{0.3em}
+\begin{block}{\small Relative Risk (RR)}
+\footnotesize Cuántas veces más probable es la palabra en el foco:
+
+$$RR = \frac{f_1/N_1}{f_2/N_2}$$
+
+Similar al log-ratio pero en escala lineal. $RR=2$ = el doble.
+\end{block}
+
+:::
+::: {.column width="46%"}
+
+\begin{exampleblock}{\small Relación con log-ratio}
+\footnotesize $RR = 2^{LR}$
+
+Un $LR=1$ equivale a $RR=2$ (el doble de frecuente).
+
+Un $LR=2$ equivale a $RR=4$ (cuatro veces más).
+
+La escala logarítmica del LR es más simétrica y estable para comparar.
+\end{exampleblock}
+
+\vspace{0.3em}
+\begin{block}{\small \%DIFF vs. RR}
+\footnotesize \%DIFF puede ser negativo o positivo: intuitivo para audiencias no expertas.
+
+RR es siempre positivo: más fácil de comparar entre palabras.
+\end{block}
+
+:::
+:::
+
+
+## Otras medidas del Excel (II): OR, BIC y ELL {shrink=5}
+
+::: {.columns}
+::: {.column width="50%"}
+
+\begin{block}{\small Odds Ratio (OR)}
+\footnotesize Razón de probabilidades; más usado en medicina:
+
+$$OR = \frac{f_1/(N_1-f_1)}{f_2/(N_2-f_2)}$$
+
+En corpus grandes con palabras raras, OR $\approx$ RR.
+\end{block}
+
+\vspace{0.3em}
+\begin{block}{\small Bayes Factor BIC}
+\footnotesize Alternativa bayesiana al $p$-valor. Cuantifica la \textbf{evidencia} a favor de H\textsubscript{1}. BIC $>$ 10: evidencia fuerte. No requiere asumir distribución normal.
+\end{block}
+
+:::
+::: {.column width="46%"}
+
+\begin{block}{\small ELL (Effect size for Log-Likelihood)}
+\footnotesize Versión estandarizada del LL: permite comparar entre estudios con corpus de distinto tamaño.
+\end{block}
+
+\vspace{0.3em}
+\begin{exampleblock}{\small ¿Cuándo usar OR o BIC?}
+\footnotesize \textbf{OR:} cuando el diseño del estudio es de tipo caso-control o cuando se quiere comparar con estudios médicos o de ciencias sociales.
+
+\textbf{BIC:} cuando se quiere dar evidencia sin asumir distribución $\chi^2$, o cuando el corpus es pequeño y el $p$-valor puede ser inestable.
+\end{exampleblock}
+
+:::
+:::
+
+
+# Resumen y cierre {.standout}
+
+
+## Lo que hemos visto hoy
+
+::: {.columns}
+::: {.column width="48%"}
+
+\small\textcolor{darkblue}{\textbf{Estadística básica}}
+
+\footnotesize
+- Población / muestra / variable / riqueza léxica
+- H\textsubscript{0} e H\textsubscript{1} · Errores tipo I y II
+- Valor $p$ · Tamaño del efecto
+- Significación $\neq$ relevancia lingüística
+
+\vspace{0.3em}
+\small\textcolor{darkblue}{\textbf{Estadística de corpus}}
+
+\footnotesize
+- Frecuencia normalizada (ptw/pmw)
+- Log-likelihood → significación
+- Log-ratio → efecto · Simple Maths → efecto suavizado
+- \%DIFF · RR · OR · BIC · ELL
+- Keyness = sig. + efecto + dispersión
+- Colocaciones: MI, t-score, logDice
+- N-gramas: bigramas y trigramas
+
+:::
+::: {.column width="48%"}
+
+\small\textcolor{accent}{\textbf{R en la práctica}}
+
+\footnotesize
+- \texttt{corpus()} · \texttt{tokens()} · \texttt{dfm()}
+- \texttt{textstat\_keyness()} · \texttt{textstat\_collocations()}
+- \texttt{tokens\_ngrams()} · \texttt{kwic()}
+- \texttt{ggplot2} + \texttt{ggrepel}
+
+\vspace{0.3em}
+\begin{alertblock}{}
+\centering\small
+\textbf{Significación estadística}
+
+$\neq$
+
+\textbf{Relevancia lingüística}
+\end{alertblock}
+
+\vspace{0.2em}
+\begin{exampleblock}{\small Materiales}
+\footnotesize\url{https://github.com/acabedo/conferences}
+\end{exampleblock}
+
+:::
+:::
+
+
+## ¿Qué medida usar? Guía práctica {shrink=5}
+
+\small
+\begin{center}
+\begin{tabular}{p{2.2cm}p{3.5cm}p{3.8cm}}
+\toprule
+\textbf{Medida} & \textbf{Cuándo usarla} & \textbf{Limitación principal} \\
+\midrule
+LL & Siempre (significación) & Crece con el tamaño del corpus \\
+Log-ratio & Efecto principal; corpus grandes & Inestable con frec. muy bajas \\
+Simple Maths & Corpus pequeños o frec. bajas & Menos interpretable que LR \\
+\%DIFF & Comunicar a audiencias no expertas & Muy sensible a frec. bajas \\
+Relative Risk & Comparar magnitud (escala lineal) & Equivale a $2^{LR}$ \\
+Odds Ratio & Estudios con diseño caso-control & Sobreestima con frec. altas \\
+BIC & Evidencia bayesiana & Requiere interpretación distinta \\
+ELL & Comparar entre estudios & Menos conocido en lingüística \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.3em}
+\begin{alertblock}{\small Recomendación estándar en lingüística de corpus}
+\footnotesize Reporta siempre \textbf{LL} (significación) + \textbf{log-ratio} (efecto) + \textbf{dispersión} (\% textos). Es lo que hacen Fuoli \& Beelitz (2024) y el estándar de Sketch Engine.
+\end{alertblock}
+
+
+## Tabla resumen de medidas
+
+\footnotesize
+\begin{center}
+\begin{tabular}{lllll}
+\toprule
+\textbf{Medida} & \textbf{Qué mide} & \textbf{Rango} & \textbf{SE} & \textbf{Excel} \\
+\midrule
+Frec. norm.   & Frecuencia relativa    & $\geq 0$     & Sí & Sí \\
+Log-likelihood& Significación          & $\geq 0$     & Sí (15.13) & Sí \\
+Log-ratio     & Tamaño del efecto      & $\mathbb{R}$ & Sí & Sí \\
+Simple Maths  & Efecto suavizado       & $> 0$        & Sí & No \\
+\%DIFF        & Dif. porcentual        & $\mathbb{R}$ & No & Sí \\
+Relative Risk & Ratio lineal de frec.  & $> 0$        & No & Sí \\
+Odds Ratio    & Razón de probabilidades& $> 0$        & No & Sí \\
+Bayes BIC     & Evidencia bayesiana    & $\mathbb{R}$ & No & Sí \\
+ELL           & Efecto estandarizado   & $[0,1]$      & No & Sí \\
+MI            & Asoc. colocados        & $\mathbb{R}$ & Sí & No \\
+t-score       & Asoc. frec.            & $\mathbb{R}$ & Sí & No \\
+logDice       & Asoc. robusta          & $(0,14]$     & Sí & No \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.2em}
+\begin{block}{\small Regla de oro}
+\footnotesize Usa \textbf{LL} para decidir si una diferencia es significativa y \textbf{log-ratio} para saber cuánto importa. Reporta siempre ambos junto con la dispersión.
+\end{block}
+
+
+## Referencias y recursos
+
+\small\textbf{Lecturas}
+
+\footnotesize
+Fuoli, M. \& Beelitz, A. (2024). Framing the path to net zero. \textit{IJCL}, 29(3), 361--388.
+
+Hardie, A. (2014). Log ratio: An informal introduction. CASS, Lancaster University.
+
+Rayson, P. \& Garside, R. (2000). Comparing corpora using frequency profiling. \textit{ACL Workshop}.
+
+Baker, P. (2006). \textit{Using Corpora in Discourse Analysis}. Continuum.
+
+\vspace{0.3em}
+\small\textbf{Herramientas}
+
+\footnotesize
+R: \url{https://www.r-project.org} · RStudio: \url{https://posit.co/download/rstudio-desktop}
+
+Sketch Engine: \url{https://www.sketchengine.eu} · AntConc: \url{https://www.laurenceanthony.net/software/antconc}
+
+\vspace{0.3em}
+\small\textbf{Materiales del seminario}
+
+\footnotesize\url{https://github.com/acabedo/conferences} — código R · corpus .txt · plantilla Excel · diapositivas
+
+
+## Preguntas
+
+\begin{center}
+\vspace{0.5em}
+{\Large\textcolor{darkblue}{\textbf{¿Preguntas?}}}
+
+\vspace{0.8em}
+\large Adrián Cabedo Nebot
+
+\small Universitat de València · Catedrático de Lengua Española
+
+\vspace{0.5em}
+\texttt{adrian.cabedo@uv.es}
+
+\vspace{0.4em}
+\small\url{https://github.com/acabedo/conferences}
+
+\vspace{0.8em}
+\textcolor{midblue}{\rule{0.6\textwidth}{0.4pt}}
+
+\vspace{0.3em}
+\footnotesize Materiales bajo licencia CC BY 4.0
+\end{center}

@@ -1,0 +1,935 @@
+---
+title: "Informe de análisis léxico de corpus"
+subtitle: "Discursos de investidura · Rajoy (2011, 2016a, 2016b) y Sánchez (2020, 2023)"
+author: "Adrián Cabedo Nebot"
+institute: "Universitat de València"
+date: today
+lang: es
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    toc-title: "Contenidos"
+    toc-location: left
+    number-sections: true
+    smooth-scroll: true
+    code-fold: true
+    code-summary: "Ver código"
+    code-tools: true
+    fig-width: 12
+    fig-height: 6
+    fig-dpi: 300
+    df-print: paged
+    self-contained: true
+    css: |
+      body { font-family: 'Source Sans Pro', sans-serif; font-size: 15px; }
+      h1, h2, h3 { color: #1D3557; }
+      .callout-note { border-left: 4px solid #457B9D; }
+      .callout-tip  { border-left: 4px solid #2a9d8f; }
+      .table > thead { background-color: #1D3557; color: white; }
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: false
+---
+
+```{r setup}
+# ============================================================
+# PAQUETES
+# Instala los que no tengas con:
+#   install.packages(c("tidyverse","quanteda","quanteda.textstats",
+#                      "quanteda.textplots","ggrepel","DT","gt",
+#                      "scales","RColorBrewer","tidytext","udpipe"))
+# ============================================================
+library(tidyverse)
+library(quanteda)
+library(quanteda.textstats)
+library(quanteda.textplots)
+library(ggrepel)
+library(DT)          # tablas interactivas HTML
+library(gt)          # tablas estáticas estilizadas
+library(scales)
+library(RColorBrewer)
+library(tidytext)    # n-gramas y tokenización alternativa
+
+# ── Paleta de colores del proyecto ──────────────────────────
+PAL <- c(
+  "Rajoy"   = "#1D3557",
+  "Sánchez" = "#E63946"
+)
+PAL5 <- c(
+  "Rajoy_2011"   = "#1D3557",
+  "Rajoy_2016a"  = "#457B9D",
+  "Rajoy_2016b"  = "#A8DADC",
+  "Sánchez_2020" = "#E63946",
+  "Sánchez_2023" = "#C1121F"
+)
+
+# ── Tema ggplot común ────────────────────────────────────────
+tl <- theme_minimal(base_size = 12) +
+  theme(
+    plot.title    = element_text(face = "bold", color = "#1D3557", size = 14),
+    plot.subtitle = element_text(color = "#457B9D", size = 11),
+    axis.title    = element_text(color = "#1D3557"),
+    panel.grid.minor = element_blank(),
+    legend.position  = "bottom"
+  )
+```
+
+```{r leer-corpus}
+# ============================================================
+# LECTURA DEL CORPUS
+# Ajusta las rutas si tus archivos están en otra carpeta.
+# Los archivos .txt deben estar en UTF-8 o Latin-1 (Windows-1252).
+# ============================================================
+
+rutas <- list(
+  Rajoy_2011   = "2011_Rajoy.txt",
+  Rajoy_2016a  = "2016_Rajoy.txt",
+  Rajoy_2016b  = "2016b_Rajoy.txt",
+  Sánchez_2020 = "2020_Sánchez.txt",
+  Sánchez_2023 = "2023_Sánchez.txt"
+)
+
+# Leer cada archivo; si la ruta no existe se avisa pero no rompe
+leer_texto <- function(ruta, nombre) {
+  if (!file.exists(ruta)) {
+    warning(paste("Archivo no encontrado:", ruta))
+    return(NA_character_)
+  }
+  paste(readLines(ruta, encoding = "UTF-8", warn = FALSE), collapse = " ")
+}
+
+textos_raw <- imap_chr(rutas, leer_texto)
+
+# Metadatos
+meta <- tibble(
+  doc_id  = names(rutas),
+  orador  = c("Rajoy","Rajoy","Rajoy","Sánchez","Sánchez"),
+  año     = c(2011L, 2016L, 2016L, 2020L, 2023L),
+  version = c("única","primera","segunda","única","única")
+)
+
+# Corpus quanteda
+corp <- corpus(textos_raw, docnames = names(rutas))
+docvars(corp) <- meta
+
+# Tokens sin puntuación ni números para análisis léxico
+toks_full <- tokens(corp,
+                    remove_punct   = TRUE,
+                    remove_numbers = TRUE,
+                    remove_symbols = TRUE) |>
+  tokens_tolower()
+
+# Tokens sin stopwords (para análisis de contenido)
+sw_es <- stopwords("es")
+toks <- tokens_remove(toks_full, sw_es)
+
+# DFM (Document-Feature Matrix)
+dfm_corp  <- dfm(toks)
+dfm_full  <- dfm(toks_full)   # con stopwords (para riqueza léxica)
+```
+
+---
+
+# Descripción general del corpus {#sec-descripcion}
+
+> En esta sección se recogen las estadísticas básicas del corpus: número de tokens, tipos léxicos y métricas de riqueza léxica. Son el punto de partida de cualquier análisis de lingüística de corpus, ya que permiten conocer el tamaño real de los textos y normalizar las frecuencias antes de cualquier comparación.
+
+```{r estadisticas-basicas}
+# ── Estadísticas básicas ─────────────────────────────────────
+# ntoken()  → total de palabras (con repeticiones)
+# ntype()   → vocabulario único
+# TTR       → Type-Token Ratio: diversidad léxica bruta
+# RTTR      → Root TTR (más estable con distintos tamaños de texto)
+
+stats <- tibble(
+  Discurso   = names(rutas),
+  Orador     = meta$orador,
+  Año        = meta$año,
+  Tokens     = ntoken(dfm_full),
+  Tipos      = ntype(dfm_full),
+  TTR        = round(Tipos / Tokens, 3),
+  RTTR       = round(Tipos / sqrt(Tokens), 2)
+)
+
+stats |>
+  gt() |>
+  tab_header(title = "Estadísticas descriptivas del corpus") |>
+  tab_spanner(label = "Riqueza léxica", columns = c(TTR, RTTR)) |>
+  cols_label(
+    Discurso = "Discurso", Orador = "Orador", Año = "Año",
+    Tokens = "Tokens", Tipos = "Tipos únicos",
+    TTR = "TTR", RTTR = "Root TTR"
+  ) |>
+  data_color(columns = TTR,
+             colors  = scales::col_numeric("Blues", domain = NULL)) |>
+  tab_footnote("TTR = Tipos / Tokens · RTTR = Tipos / √Tokens · " |>
+               paste0("Valores más altos indican mayor variedad léxica")) |>
+  tab_options(table.width = pct(100),
+              heading.background.color = "#1D3557")
+```
+
+## Tamaño del corpus por discurso {#sec-tokens}
+
+```{r grafico-tokens}
+# Gráfico de barras horizontales del número de tokens por discurso.
+# La longitud varía considerablemente: los discursos de Sánchez (2020, 2023)
+# son notablemente más largos que los de Rajoy, lo que obliga a normalizar
+# las frecuencias antes de cualquier comparación directa.
+
+stats |>
+  mutate(Discurso = fct_reorder(Discurso, Tokens)) |>
+  ggplot(aes(x = Discurso, y = Tokens, fill = Orador)) +
+  geom_col(width = 0.65, alpha = 0.9) +
+  geom_text(aes(label = format(Tokens, big.mark = ".")),
+            hjust = -0.1, size = 3.5, color = "#1D3557") +
+  coord_flip() +
+  scale_fill_manual(values = PAL) +
+  scale_y_continuous(labels = label_comma(), limits = c(0, 17000)) +
+  labs(title    = "Número de tokens por discurso",
+       subtitle = paste0("Total del corpus: ",
+                         format(sum(stats$Tokens), big.mark = "."), " tokens"),
+       x = NULL, y = "Tokens") +
+  tl
+```
+
+## Riqueza léxica (TTR y RTTR) {#sec-riqueza}
+
+::: {.callout-note}
+**¿Qué es la riqueza léxica?** El *Type-Token Ratio* (TTR) mide la proporción de palabras únicas respecto al total de palabras. Un TTR alto indica mayor variedad en el vocabulario. El *Root TTR* (RTTR) corrige el efecto del tamaño del texto, haciendo las comparaciones más justas entre discursos de distinta longitud.
+:::
+
+```{r grafico-riqueza}
+# Gráfico de puntos que compara TTR y RTTR entre discursos.
+# Se usa RTTR para la comparación definitiva porque el TTR bruto
+# penaliza sistemáticamente a los textos más largos.
+
+stats |>
+  pivot_longer(c(TTR, RTTR), names_to = "medida", values_to = "valor") |>
+  ggplot(aes(x = Discurso, y = valor, color = Orador,
+             shape = medida, group = medida)) +
+  geom_line(aes(group = medida), color = "gray70", linewidth = 0.7) +
+  geom_point(size = 4.5) +
+  scale_color_manual(values = PAL) +
+  scale_shape_manual(values = c(TTR = 16, RTTR = 17),
+                     labels = c(TTR  = "TTR (sensible al tamaño)",
+                                RTTR = "Root TTR (normalizado)")) +
+  facet_wrap(~medida, scales = "free_y") +
+  labs(title    = "Riqueza léxica: TTR y Root TTR",
+       subtitle = "RTTR es la medida recomendada para comparar textos de distinto tamaño",
+       x = NULL, y = "Valor", color = "Orador", shape = "Medida") +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1)) +
+  tl
+```
+
+---
+
+# Frecuencias léxicas {#sec-frecuencias}
+
+> Esta sección analiza las palabras más frecuentes de cada discurso y del corpus agrupado por orador. Se trabaja siempre con **frecuencias normalizadas** (ocurrencias por cada 1.000 tokens) para poder comparar discursos de distinta longitud.
+
+## Palabras más frecuentes por discurso {#sec-top-palabras}
+
+```{r top-palabras-tabla}
+# Las 20 palabras más frecuentes de cada discurso (sin stopwords).
+# Se usa dfm_weight() para normalizar por 1.000 tokens (ptw = per thousand words).
+
+dfm_norm <- dfm_weight(dfm_corp, scheme = "prop") * 1000
+
+top_por_doc <- map_dfr(docnames(dfm_corp), function(doc) {
+  topfeatures(dfm_norm[doc, ], n = 20) |>
+    enframe(name = "palabra", value = "frec_norm") |>
+    mutate(discurso = doc,
+           orador   = if_else(str_starts(doc, "Rajoy"), "Rajoy", "Sánchez"),
+           frec_norm = round(frec_norm, 2))
+})
+
+# Tabla interactiva con DT
+top_por_doc |>
+  select(Discurso = discurso, Orador = orador,
+         Palabra = palabra, `Frec. norm. (ptw)` = frec_norm) |>
+  datatable(
+    filter    = "top",
+    options   = list(pageLength = 15, scrollX = TRUE),
+    caption   = "Top 20 palabras por discurso (sin stopwords, por 1.000 tokens)"
+  ) |>
+  formatRound(columns = "Frec. norm. (ptw)", digits = 2)
+```
+
+## Gráfico de palabras más frecuentes {#sec-barras-frecuencias}
+
+```{r top-palabras-grafico}
+# Top 15 palabras por discurso en barras horizontales, una por panel.
+# El color indica el orador para facilitar la comparación visual.
+
+top_por_doc |>
+  group_by(discurso) |>
+  slice_max(frec_norm, n = 15) |>
+  ungroup() |>
+  mutate(palabra   = reorder_within(palabra, frec_norm, discurso),
+         discurso  = factor(discurso, levels = names(rutas))) |>
+  ggplot(aes(x = palabra, y = frec_norm, fill = orador)) +
+  geom_col(alpha = 0.88, width = 0.7) +
+  coord_flip() +
+  scale_x_reordered() +
+  scale_fill_manual(values = PAL) +
+  facet_wrap(~discurso, scales = "free_y", ncol = 2) +
+  labs(title    = "Top 15 palabras más frecuentes por discurso",
+       subtitle = "Sin stopwords · Frecuencia normalizada por 1.000 tokens",
+       x = NULL, y = "Frec. por 1.000 tokens", fill = "Orador") +
+  tl + theme(axis.text.y = element_text(size = 8))
+```
+
+## Comparación por orador: frecuencias medias {#sec-frecuencias-orador}
+
+```{r frecuencias-orador}
+# Agrupamos los discursos por orador y calculamos la frecuencia media
+# de las 20 palabras más frecuentes en el corpus de cada orador.
+# Esto da una imagen del vocabulario "típico" de cada político.
+
+dfm_orador <- dfm_group(dfm_corp, groups = docvars(dfm_corp, "orador"))
+dfm_orador_norm <- dfm_weight(dfm_orador, scheme = "prop") * 1000
+
+top_orador <- map_dfr(c("Rajoy","Sánchez"), function(or) {
+  topfeatures(dfm_orador_norm[or, ], n = 25) |>
+    enframe(name = "palabra", value = "frec_norm") |>
+    mutate(orador = or, frec_norm = round(frec_norm, 2))
+})
+
+top_orador |>
+  mutate(palabra = reorder_within(palabra, frec_norm, orador)) |>
+  ggplot(aes(x = palabra, y = frec_norm, fill = orador)) +
+  geom_col(alpha = 0.88, width = 0.7) +
+  coord_flip() +
+  scale_x_reordered() +
+  scale_fill_manual(values = PAL) +
+  facet_wrap(~orador, scales = "free") +
+  labs(title    = "Top 25 palabras por orador",
+       subtitle = "Corpus agrupado · Sin stopwords · Frec. norm. por 1.000 tokens",
+       x = NULL, y = "Frec. por 1.000 tokens", fill = "Orador") +
+  tl + theme(legend.position = "none",
+             axis.text.y = element_text(size = 9))
+```
+
+---
+
+# N-gramas: secuencias frecuentes {#sec-ngramas}
+
+> Los n-gramas son secuencias de *n* palabras consecutivas. Los bigramas (n=2) y trigramas (n=3) revelan expresiones fijas y patrones fraseológicos que los análisis de palabras aisladas no captan: *«estado del bienestar»*, *«unidad de España»*, *«reforma laboral»*, etc.
+
+## Bigramas más frecuentes {#sec-bigramas}
+
+```{r bigramas}
+# Se calculan bigramas incluyendo stopwords para capturar patrones
+# gramaticales reales (p. ej. "de la", "en el" son informativos
+# en su contexto fraseológico cuando van seguidos de contenido).
+# Aquí los calculamos sin stopwords para centrarnos en el contenido léxico.
+
+toks_ngram2 <- tokens_ngrams(toks, n = 2)
+dfm_bi <- dfm(toks_ngram2)
+dfm_bi_orador <- dfm_group(dfm_bi, groups = docvars(dfm_bi, "orador"))
+dfm_bi_norm   <- dfm_weight(dfm_bi_orador, scheme = "prop") * 1000
+
+top_bi <- map_dfr(c("Rajoy","Sánchez"), function(or) {
+  topfeatures(dfm_bi_norm[or, ], n = 20) |>
+    enframe(name = "bigrama", value = "frec_norm") |>
+    mutate(orador = or,
+           bigrama = str_replace_all(bigrama, "_", " "),
+           frec_norm = round(frec_norm, 2))
+})
+
+top_bi |>
+  mutate(bigrama = reorder_within(bigrama, frec_norm, orador)) |>
+  ggplot(aes(x = bigrama, y = frec_norm, fill = orador)) +
+  geom_col(alpha = 0.88, width = 0.7) +
+  coord_flip() +
+  scale_x_reordered() +
+  scale_fill_manual(values = PAL) +
+  facet_wrap(~orador, scales = "free") +
+  labs(title    = "Top 20 bigramas por orador",
+       subtitle = "Sin stopwords · Frec. norm. por 1.000 tokens",
+       x = NULL, y = "Frec. por 1.000 tokens", fill = "Orador") +
+  tl + theme(legend.position = "none",
+             axis.text.y = element_text(size = 8.5))
+```
+
+## Trigramas más frecuentes {#sec-trigramas}
+
+```{r trigramas}
+# Los trigramas detectan expresiones fijas de tres palabras.
+# Son especialmente reveladores en el discurso político,
+# donde las fórmulas retóricas repetidas son una marca de estilo.
+
+toks_ngram3 <- tokens_ngrams(toks, n = 3)
+dfm_tri <- dfm(toks_ngram3)
+dfm_tri_orador <- dfm_group(dfm_tri, groups = docvars(dfm_tri, "orador"))
+dfm_tri_norm   <- dfm_weight(dfm_tri_orador, scheme = "prop") * 1000
+
+top_tri <- map_dfr(c("Rajoy","Sánchez"), function(or) {
+  topfeatures(dfm_tri_norm[or, ], n = 15) |>
+    enframe(name = "trigrama", value = "frec_norm") |>
+    mutate(orador = or,
+           trigrama = str_replace_all(trigrama, "_", " "),
+           frec_norm = round(frec_norm, 2))
+})
+
+top_tri |>
+  mutate(trigrama = reorder_within(trigrama, frec_norm, orador)) |>
+  ggplot(aes(x = trigrama, y = frec_norm, fill = orador)) +
+  geom_col(alpha = 0.88, width = 0.7) +
+  coord_flip() +
+  scale_x_reordered() +
+  scale_fill_manual(values = PAL) +
+  facet_wrap(~orador, scales = "free") +
+  labs(title    = "Top 15 trigramas por orador",
+       subtitle = "Sin stopwords · Frec. norm. por 1.000 tokens",
+       x = NULL, y = "Frec. por 1.000 tokens", fill = "Orador") +
+  tl + theme(legend.position = "none",
+             axis.text.y = element_text(size = 8.5))
+```
+
+---
+
+# Análisis de palabras clave (*keyness*) {#sec-keyness}
+
+> La *keyness* identifica las palabras cuya frecuencia en el **corpus foco** (Sánchez) difiere significativamente del **corpus de referencia** (Rajoy). Para cada palabra se calcula: (1) el **log-likelihood** (LL), que mide si la diferencia es estadísticamente significativa; y (2) el **log-ratio** (LR), que mide cuántas veces más frecuente es en un corpus que en otro.
+>
+> Solo se consideran palabras clave aquellas con **LL ≥ 15,13** (*p* < 0,0001), que es el umbral estándar de Sketch Engine, y que aparezcan al menos en el **50% de los textos** del corpus foco.
+
+```{r funciones-estadisticas}
+# ── Funciones reutilizables ──────────────────────────────────
+
+# Log-likelihood (Rayson & Garside, 2000)
+calc_LL <- function(O1, O2, N1, N2) {
+  total <- O1 + O2
+  E1 <- total * N1 / (N1 + N2)
+  E2 <- total * N2 / (N1 + N2)
+  LL <- 2 * (ifelse(O1 > 0, O1 * log(O1 / E1), 0) +
+             ifelse(O2 > 0, O2 * log(O2 / E2), 0))
+  round(LL, 2)
+}
+
+# Log-ratio (Hardie, 2014) — tamaño del efecto
+calc_LR <- function(O1, O2, N1, N2) {
+  round(log2(((O1 + 0.5) / N1) / ((O2 + 0.5) / N2)), 3)
+}
+
+# Simple Maths de Sketch Engine (add-N smoothing)
+calc_SM <- function(O1, O2, N1, N2, add_N = 1000) {
+  round(((O1 + add_N) / N1) / ((O2 + add_N) / N2), 4)
+}
+
+# Etiqueta de significación
+etiqueta_sig <- function(LL) {
+  case_when(
+    LL >= 15.13 ~ "****  p<0.0001",
+    LL >= 10.83 ~ "***   p<0.001",
+    LL >= 6.63  ~ "**    p<0.01",
+    LL >= 3.84  ~ "*     p<0.05",
+    TRUE        ~ "n.s."
+  )
+}
+```
+
+```{r calcular-keyness}
+# ── Cálculo manual de keyness ────────────────────────────────
+# Agrupamos los textos en dos sub-corpora: Sánchez (foco) y Rajoy (referencia).
+# Para cada tipo léxico calculamos LL, LR y SM.
+
+# Frecuencias brutas por orador
+dfm_grp <- dfm_group(dfm_corp, groups = docvars(dfm_corp, "orador"))
+N_san   <- ntoken(dfm_grp["Sánchez", ])
+N_raj   <- ntoken(dfm_grp["Rajoy",   ])
+
+# Convertir a data frame largo
+frecs <- convert(dfm_grp, to = "data.frame") |>
+  pivot_longer(-doc_id, names_to = "palabra", values_to = "frec") |>
+  pivot_wider(names_from = doc_id, values_from = frec, values_fill = 0) |>
+  rename(f_san = Sánchez, f_raj = Rajoy) |>
+  filter(f_san + f_raj >= 3)   # descartar hápax y cuasi-hápax
+
+# Dispersión: % de documentos del corpus foco donde aparece cada palabra
+docs_san <- docnames(dfm_corp)[docvars(dfm_corp, "orador") == "Sánchez"]
+n_docs_san <- length(docs_san)
+
+disp_san <- map_dbl(frecs$palabra, function(p) {
+  if (!p %in% featnames(dfm_corp)) return(0)
+  sum(dfm_corp[docs_san, p] > 0) / n_docs_san
+})
+
+# Tabla completa de keyness
+keyness_tbl <- frecs |>
+  mutate(
+    dispersion_san = round(disp_san, 2),
+    LL   = mapply(calc_LL, f_san, f_raj, N_san, N_raj),
+    LR   = mapply(calc_LR, f_san, f_raj, N_san, N_raj),
+    SM   = mapply(calc_SM, f_san, f_raj, N_san, N_raj),
+    sig  = etiqueta_sig(LL),
+    ptw_san = round(f_san / N_san * 1000, 3),
+    ptw_raj = round(f_raj / N_raj * 1000, 3)
+  ) |>
+  arrange(desc(abs(LL)))
+```
+
+## Tabla completa de palabras clave {#sec-tabla-kw}
+
+```{r tabla-keyness}
+# Tabla interactiva con todas las palabras que superan el umbral LL ≥ 15.13.
+# LR positivo = más frecuente en Sánchez · LR negativo = más en Rajoy.
+
+keyness_tbl |>
+  filter(LL >= 15.13, dispersion_san >= 0.5 | LR < 0) |>
+  mutate(
+    corpus_clave = if_else(LR > 0, "Sánchez", "Rajoy")
+  ) |>
+  select(
+    Palabra     = palabra,
+    `Corpus clave` = corpus_clave,
+    `F. Sánchez`   = f_san,
+    `F. Rajoy`     = f_raj,
+    `ptw Sánchez`  = ptw_san,
+    `ptw Rajoy`    = ptw_raj,
+    `Disp. Sánchez`= dispersion_san,
+    LL, LR, SM,
+    Significación  = sig
+  ) |>
+  datatable(
+    filter  = "top",
+    options = list(pageLength = 20, scrollX = TRUE,
+                   order = list(list(7, "desc"))),  # ordenar por LL
+    caption = "Palabras clave (LL ≥ 15.13 · Sánchez foco, Rajoy referencia)"
+  ) |>
+  formatRound(columns = c("ptw Sánchez","ptw Rajoy","LL","LR","SM"),
+              digits = 3) |>
+  formatStyle("Corpus clave",
+    backgroundColor = styleEqual(
+      c("Sánchez","Rajoy"), c("#fde8ea","#dce8f5")
+    )
+  )
+```
+
+## Mapa léxico: LL × log-ratio {#sec-mapa-lexico}
+
+::: {.callout-tip}
+**Cómo leer este gráfico:** cada punto es una palabra. El **eje Y** muestra la significación estadística (LL): cuanto más arriba, más fiable es la diferencia. El **eje X** muestra el tamaño del efecto (log-ratio): los puntos a la derecha son más frecuentes en Sánchez; los de la izquierda, en Rajoy. La línea discontinua marca el umbral LL = 15,13 (*p* < 0,0001).
+:::
+
+```{r mapa-lexico, fig.height=7}
+# El gráfico LL × LR es la visualización estándar en CADS (corpus-assisted
+# discourse analysis). Permite identificar de un solo vistazo qué palabras
+# son al mismo tiempo significativas y de gran efecto.
+
+kw_plot <- keyness_tbl |>
+  filter(LL >= 6.63) |>    # mostrar palabras al menos ** significativas
+  mutate(
+    grupo = case_when(
+      LR > 0 & LL >= 15.13 ~ "Clave Sánchez",
+      LR < 0 & LL >= 15.13 ~ "Clave Rajoy",
+      TRUE                  ~ "Tendencia (no umbral)"
+    )
+  ) |>
+  slice_max(abs(LR), n = 60)
+
+ggplot(kw_plot, aes(x = LR, y = LL, color = grupo, label = palabra)) +
+  geom_point(aes(size = abs(LR)), alpha = 0.8) +
+  geom_text_repel(size = 3, max.overlaps = 30,
+                  fontface = ifelse(kw_plot$LL >= 15.13, "bold", "plain")) +
+  geom_hline(yintercept = 15.13, linetype = "dashed",
+             color = "gray40", linewidth = 0.7) +
+  geom_hline(yintercept = 6.63, linetype = "dotted",
+             color = "gray60", linewidth = 0.5) +
+  geom_vline(xintercept = 0, linetype = "dashed",
+             color = "gray40", linewidth = 0.7) +
+  annotate("text", x =  2.5, y = max(kw_plot$LL) * 0.97,
+           label = "← más en Sánchez",
+           color = "#E63946", size = 3.5, fontface = "bold") +
+  annotate("text", x = -2.0, y = max(kw_plot$LL) * 0.97,
+           label = "más en Rajoy →",
+           color = "#1D3557", size = 3.5, fontface = "bold") +
+  scale_color_manual(
+    values = c("Clave Sánchez"       = "#E63946",
+               "Clave Rajoy"         = "#1D3557",
+               "Tendencia (no umbral)"= "#A8DADC"),
+    name = NULL
+  ) +
+  scale_size(range = c(1.5, 6), guide = "none") +
+  labs(title    = "Mapa léxico: Sánchez vs. Rajoy",
+       subtitle = "LL ≥ 15,13 (línea discontinua) = p < 0,0001 · LL ≥ 6,63 (punteada) = p < 0,01",
+       x        = "Log-ratio (tamaño del efecto)",
+       y        = "Log-likelihood (significación estadística)") +
+  tl
+```
+
+---
+
+# Log-ratio y Simple Maths {#sec-lr-sm}
+
+> Esta sección compara directamente las dos principales medidas de efecto: el **log-ratio** (LR), que es una medida pura de la diferencia de frecuencias relativas, y el **Simple Maths** (SM) de Sketch Engine, que aplica un suavizado (*add-N = 1000*) para estabilizar los valores de palabras poco frecuentes. Ambas medidas son complementarias: LR es más preciso con palabras frecuentes; SM es más robusto con palabras raras.
+
+```{r lr-vs-sm}
+# Comparación LR vs. SM para las palabras más significativas.
+# Se espera que coincidan en palabras frecuentes y diverjan en las raras.
+
+kw_lr_sm <- keyness_tbl |>
+  filter(LL >= 15.13) |>
+  mutate(diferencia_abs = abs(LR - log2(SM))) |>
+  arrange(desc(abs(LL))) |>
+  head(40)
+
+ggplot(kw_lr_sm, aes(x = LR, y = log2(SM), color = LR > 0, label = palabra)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed",
+              color = "gray50", linewidth = 0.8) +
+  geom_point(aes(size = LL), alpha = 0.8) +
+  geom_text_repel(size = 3, max.overlaps = 25) +
+  scale_color_manual(values = c("TRUE" = "#E63946", "FALSE" = "#1D3557"),
+                     labels = c("TRUE" = "Sánchez", "FALSE" = "Rajoy"),
+                     name   = "Más frecuente en") +
+  scale_size(range = c(2, 7), name = "LL") +
+  labs(title    = "Log-ratio vs. log₂(Simple Maths)",
+       subtitle = "Línea diagonal = coincidencia perfecta · Desviaciones = efecto del suavizado SM",
+       x = "Log-ratio (LR)", y = "log₂(Simple Maths)") +
+  tl
+
+# Tabla: palabras donde LR y SM difieren más (mayor impacto del suavizado)
+kw_lr_sm |>
+  select(Palabra = palabra,
+         `F. Sánchez` = f_san, `F. Rajoy` = f_raj,
+         LR, `log2(SM)` = SM, `|LR - log2(SM)|` = diferencia_abs,
+         LL) |>
+  mutate(`log2(SM)` = round(log2(`log2(SM)`), 3)) |>
+  arrange(desc(`|LR - log2(SM)|`)) |>
+  head(15) |>
+  gt() |>
+  tab_header(title = "Palabras donde LR y SM difieren más",
+             subtitle = "El suavizado de SM tiene mayor impacto en palabras de baja frecuencia") |>
+  data_color(columns = `|LR - log2(SM)|`,
+             colors  = scales::col_numeric("Oranges", domain = NULL)) |>
+  tab_options(table.width = pct(100))
+```
+
+---
+
+# Colocaciones {#sec-colocaciones}
+
+> Las **colocaciones** son pares de palabras que co-ocurren con más frecuencia de la que cabría esperar por azar, dentro de una ventana de ±*k* palabras alrededor de un **nodo**. Se analizan aquí los colocados más fuertes de las palabras clave más discriminantes: *cambio* (Sánchez) y *reforma* (Rajoy). Se calculan tres medidas de asociación complementarias:
+>
+> - **MI** (*Mutual Information*): detecta colocaciones raras pero fijas, propias de la fraseología especializada.
+> - **t-score**: detecta colocaciones frecuentes y gramaticalmente productivas.
+> - **logDice**: equilibra ambos extremos y es más robusto con frecuencias bajas.
+
+```{r colocaciones-funcion}
+# Función genérica para calcular colocaciones de un nodo dado.
+# Devuelve siempre un tibble con columna 'nodo', incluso si está vacío.
+calcular_colocaciones <- function(nodo, ventana = 3, min_cooc = 3) {
+  toks_sel <- tokens_select(toks_full, nodo,
+                            selection = "keep",
+                            window    = ventana,
+                            padding   = TRUE)
+  
+  # textstat_collocations puede fallar si hay muy pocas co-ocurrencias
+  col <- tryCatch(
+    textstat_collocations(toks_sel, size = 2, min_count = min_cooc),
+    error = function(e) NULL
+  )
+  
+  if (is.null(col) || nrow(col) == 0) {
+    return(tibble(collocation = character(), count = integer(),
+                  lambda = numeric(), z = numeric(), nodo = nodo))
+  }
+  
+  col |>
+    as_tibble() |>
+    filter(!str_detect(collocation,
+                       paste0("^", nodo, " |", " ", nodo, "$"))) |>
+    arrange(desc(lambda)) |>
+    head(20) |>
+    mutate(nodo = nodo)
+}
+```
+
+```{r colocaciones-calcular}
+# Colocaciones de "cambio" y "reforma" (nodos elegidos por su alto LL
+# y su carga ideológica opuesta en los dos corpus)
+
+col_cambio  <- calcular_colocaciones("cambio",  ventana = 4)
+col_reforma <- calcular_colocaciones("reforma", ventana = 4)
+col_todos   <- bind_rows(col_cambio, col_reforma)
+```
+
+```{r colocaciones-grafico}
+# Gráfico de puntos: lambda (≈ MI) en eje Y, frecuencia de co-ocurrencia en eje X.
+# Los puntos más a la derecha y arriba son los colocados más fuertes y frecuentes.
+
+col_plot <- bind_rows(
+  col_cambio  |> mutate(nodo = "cambio",  color_nodo = "Sánchez"),
+  col_reforma |> mutate(nodo = "reforma", color_nodo = "Rajoy")
+) |>
+  mutate(collocation = str_replace_all(collocation, "_", " ")) |>
+  filter(!is.na(lambda), !is.na(count))
+
+if (nrow(col_plot) > 0) {
+  ggplot(col_plot, aes(x = count, y = lambda, label = collocation,
+                       color = color_nodo)) +
+    geom_point(size = 3, alpha = 0.8) +
+    geom_text_repel(size = 3, max.overlaps = 20) +
+    scale_color_manual(values = PAL, name = "Nodo principal") +
+    facet_wrap(~nodo, scales = "free") +
+    labs(title    = "Colocaciones de 'cambio' y 'reforma'",
+         subtitle = "Eje X: frecuencia de co-ocurrencia · Eje Y: fuerza de asociación (lambda ≈ MI)",
+         x = "Frecuencia de co-ocurrencia", y = "Lambda (aprox. MI)") +
+    tl
+} else {
+  message("No se encontraron colocaciones suficientes con los parámetros actuales.")
+}
+```
+
+```{r colocaciones-tabla}
+# Tabla de colocados con sus estadísticas de asociación
+
+col_todos |>
+  select(
+    Nodo        = nodo,
+    Colocación  = collocation,
+    `Co-ocurr.` = count,
+    Lambda      = lambda,
+    z           = z
+  ) |>
+  mutate(Colocación = str_replace_all(Colocación, "_", " "),
+         Lambda = round(Lambda, 3),
+         z      = round(z, 3)) |>
+  datatable(
+    filter  = "top",
+    options = list(pageLength = 15),
+    caption = "Colocaciones principales (ventana ±4, mín. 3 co-ocurrencias)"
+  )
+```
+
+---
+
+# Dispersión léxica {#sec-dispersion}
+
+> La **dispersión** mide cómo se distribuye una palabra a lo largo de los textos del corpus. Una palabra muy frecuente pero concentrada en un solo discurso no es representativa del estilo del orador. El **Deviation of Proportions** (DP) de Gries (2008) oscila entre 0 (perfectamente dispersa) y 1 (concentrada en un único texto).
+
+```{r dispersion}
+# Calculamos la dispersión de las palabras clave más relevantes
+# usando la función textstat_frequency() de quanteda, que incluye
+# el número de documentos en que aparece cada tipo.
+
+freq_global <- textstat_frequency(dfm_corp,
+                                  groups = docvars(dfm_corp, "orador"))
+
+# Dispersión manual: proporción de documentos donde aparece cada palabra
+dispersion_df <- convert(dfm_corp, to = "data.frame") |>
+  pivot_longer(-doc_id, names_to = "palabra", values_to = "frec") |>
+  left_join(meta, by = c("doc_id" = "doc_id")) |>
+  group_by(palabra, orador) |>
+  summarise(
+    n_docs      = n(),
+    docs_presencia = sum(frec > 0),
+    prop_docs   = round(docs_presencia / n_docs, 2),
+    frec_media  = round(mean(frec), 2),
+    frec_sd     = round(sd(frec), 2),
+    .groups = "drop"
+  )
+
+# Palabras clave con alta LL: ¿cómo de bien dispersas están?
+top_kw_palabras <- keyness_tbl |>
+  filter(LL >= 15.13) |>
+  slice_max(abs(LR), n = 30) |>
+  pull(palabra)
+
+dispersion_df |>
+  filter(palabra %in% top_kw_palabras) |>
+  mutate(
+    label_dispersion = if_else(prop_docs >= 0.5,
+                               "Bien dispersa (≥50%)",
+                               "Concentrada (<50%)"),
+    palabra = fct_reorder(palabra, prop_docs)
+  ) |>
+  ggplot(aes(x = palabra, y = prop_docs, fill = orador,
+             alpha = label_dispersion)) +
+  geom_col(width = 0.65, position = "dodge") +
+  geom_hline(yintercept = 0.5, linetype = "dashed",
+             color = "#E63946", linewidth = 0.8) +
+  coord_flip() +
+  scale_fill_manual(values = PAL) +
+  scale_alpha_manual(values = c("Bien dispersa (≥50%)" = 0.95,
+                                "Concentrada (<50%)"   = 0.45),
+                     name = NULL) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(title    = "Dispersión de las palabras clave más relevantes",
+       subtitle = "Línea roja: umbral del 50% (mínimo Sketch Engine) · Barras transparentes = concentradas",
+       x = NULL, y = "% de documentos donde aparece",
+       fill = "Orador") +
+  tl + theme(axis.text.y = element_text(size = 8.5))
+```
+
+---
+
+# Evolución diacrónica {#sec-diacronia}
+
+> Esta sección rastrea la evolución de las frecuencias normalizadas de las palabras clave a lo largo de los cinco discursos, ordenados cronológicamente. Permite detectar si el léxico de un mismo orador varía entre convocatorias y observar los cambios de vocabulario al cambiar de gobierno.
+
+```{r diacronia}
+# Frecuencias normalizadas (ptw) de las palabras más clave en cada discurso.
+# Se ordenan los discursos cronológicamente para ver la evolución temporal.
+
+palabras_diacronicas <- keyness_tbl |>
+  filter(LL >= 15.13) |>
+  slice_max(abs(LR), n = 10) |>
+  pull(palabra)
+
+dfm_norm_doc <- dfm_weight(dfm_corp, scheme = "prop") * 1000
+
+# Filtrar solo palabras que realmente existen en el DFM
+palabras_diacronicas <- intersect(palabras_diacronicas,
+                                  featnames(dfm_norm_doc))
+
+if (length(palabras_diacronicas) == 0) {
+  message("No hay palabras clave con LL ≥ 15.13 en el DFM.")
+} else {
+  # Extraer frecuencias directamente como matriz y convertir a tibble largo
+  mat <- as.matrix(dfm_norm_doc[, palabras_diacronicas])
+  
+  diac_df <- as_tibble(mat) |>
+    mutate(doc_id = docnames(dfm_norm_doc)) |>
+    pivot_longer(cols      = all_of(palabras_diacronicas),
+                 names_to  = "palabra",
+                 values_to = "ptw") |>
+    left_join(meta, by = "doc_id") |>
+    mutate(doc_id = factor(doc_id, levels = names(rutas)))
+
+  ggplot(diac_df, aes(x = doc_id, y = ptw,
+                      color = palabra, group = palabra)) +
+    geom_line(linewidth = 1) +
+    geom_point(aes(shape = orador), size = 3) +
+    geom_vline(xintercept = 3.5, linetype = "dashed",
+               color = "gray50", linewidth = 0.8) +
+    annotate("text", x = 2,   y = max(diac_df$ptw) * 0.95,
+             label = "Rajoy",   color = "#1D3557",
+             size = 3.5, fontface = "bold") +
+    annotate("text", x = 4.5, y = max(diac_df$ptw) * 0.95,
+             label = "Sánchez", color = "#E63946",
+             size = 3.5, fontface = "bold") +
+    scale_color_brewer(palette = "Paired", name = "Palabra") +
+    facet_wrap(~palabra, scales = "free_y", ncol = 3) +
+    labs(title    = "Evolución diacrónica de las palabras clave",
+         subtitle = "Frec. normalizada por 1.000 tokens · Línea vertical: cambio de orador",
+         x = NULL, y = "Frec. por 1.000 tokens", shape = "Orador") +
+    tl + theme(axis.text.x = element_text(angle = 40, hjust = 1, size = 7),
+               legend.position = "none")
+}
+```
+
+---
+
+# Tabla maestra de resultados {#sec-tabla-maestra}
+
+> Esta tabla reúne, para cada palabra que supera el umbral de significación, todas las medidas calculadas en el informe: frecuencias brutas y normalizadas, dispersión, log-likelihood, log-ratio y Simple Maths. Puede filtrarse, ordenarse y exportarse.
+
+```{r tabla-maestra}
+# Tabla exportable con todos los resultados integrados
+
+tabla_maestra <- keyness_tbl |>
+  filter(LL >= 6.63) |>      # al menos p < 0.01
+  left_join(
+    dispersion_df |>
+      filter(orador == "Sánchez") |>
+      select(palabra, prop_docs_san = prop_docs),
+    by = "palabra"
+  ) |>
+  left_join(
+    dispersion_df |>
+      filter(orador == "Rajoy") |>
+      select(palabra, prop_docs_raj = prop_docs),
+    by = "palabra"
+  ) |>
+  mutate(
+    corpus_clave = if_else(LR > 0, "Sánchez", "Rajoy"),
+    apto_SE      = if_else(LL >= 15.13 &
+                           ((LR > 0 & !is.na(prop_docs_san) &
+                              prop_docs_san >= 0.5) |
+                            LR < 0),
+                           "Sí", "No")
+  ) |>
+  select(
+    Palabra       = palabra,
+    `Corpus clave`= corpus_clave,
+    `Válida (SE)` = apto_SE,
+    `F. Sánchez`  = f_san,
+    `F. Rajoy`    = f_raj,
+    `ptw Sánchez` = ptw_san,
+    `ptw Rajoy`   = ptw_raj,
+    `Disp. Sán.`  = prop_docs_san,
+    `Disp. Raj.`  = prop_docs_raj,
+    LL, LR, SM,
+    Significación = sig
+  ) |>
+  arrange(desc(abs(LL)))
+
+datatable(
+  tabla_maestra,
+  filter    = "top",
+  extensions = "Buttons",
+  options   = list(
+    pageLength = 25,
+    scrollX    = TRUE,
+    dom        = "Bfrtip",
+    buttons    = c("csv", "excel", "copy"),
+    order      = list(list(9, "desc"))
+  ),
+  caption = "Tabla maestra · LL ≥ 6,63 · Exportable a CSV/Excel"
+) |>
+  formatRound(columns = c("ptw Sánchez","ptw Rajoy","LL","LR","SM"),
+              digits  = 3) |>
+  formatStyle(
+    "Corpus clave",
+    backgroundColor = styleEqual(
+      c("Sánchez","Rajoy"), c("#fde8ea","#dce8f5")
+    )
+  ) |>
+  formatStyle(
+    "Válida (SE)",
+    color = styleEqual(c("Sí","No"), c("#155724","#721c24")),
+    fontWeight = "bold"
+  )
+```
+
+---
+
+# Resumen metodológico {#sec-metodologia}
+
+::: {.callout-note}
+## Decisiones metodológicas
+
+| Parámetro | Valor | Justificación |
+|---|---|---|
+| Umbral significación | LL ≥ 15,13 (*p* < 0,0001) | Estándar Sketch Engine; reduce falsos positivos en comparaciones múltiples |
+| Umbral dispersión | ≥ 50% de textos del foco | Garantiza representatividad en todo el sub-corpus |
+| Medida de efecto principal | Log-ratio (LR) | Interpretable en escala logarítmica; no depende del tamaño muestral |
+| Medida de efecto alternativa | Simple Maths (add-N = 1000) | Más estable con palabras de baja frecuencia |
+| Stopwords | Lista `stopwords("es")` de quanteda | Elimina palabras gramaticales para análisis de contenido |
+| Ventana de colocación | ±4 palabras | Captura relaciones sintácticas directas |
+| Mín. co-ocurrencias | 3 | Elimina colocaciones espurias o accidentales |
+| N-gramas | Bigramas y trigramas | Sin stopwords; captura expresiones fijas de contenido |
+
+:::
+
+```{r session-info, results="asis"}
+# Información de la sesión de R para reproducibilidad del análisis
+cat("**Análisis generado con R versión**", R.version$major, ".",
+    R.version$minor, "el", format(Sys.time(), "%d/%m/%Y a las %H:%M"), "\n\n")
+cat("**Paquetes principales:**\n\n")
+pkgs <- c("quanteda","quanteda.textstats","tidyverse","tidytext",
+          "ggrepel","DT","gt")
+for (p in pkgs) {
+  cat("-", p, as.character(packageVersion(p)), "\n")
+}
+```
+
+---
+
+*Informe generado automáticamente con Quarto y R. El código fuente completo está disponible en* `informe_corpus.qmd`.

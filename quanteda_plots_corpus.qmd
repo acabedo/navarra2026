@@ -1,0 +1,983 @@
+---
+title: "Visualización de datos textuales con quanteda"
+subtitle: "Réplica de la guía oficial aplicada al corpus de discursos de investidura"
+author: "Adrián Cabedo Nebot"
+institute: "Universitat de València"
+date: today
+date-format: "D [de] MMMM [de] YYYY"
+lang: es
+
+format:
+  pdf:
+    documentclass: scrartcl
+    classoption:
+      - "12pt"
+      - "a4paper"
+    papersize: a4
+    geometry: "top=3cm, bottom=3cm, left=3cm, right=3cm"
+    fontfamily: libertinus
+    mathfont: "Libertinus Math"
+    monofont: "JetBrains Mono"
+    monofontoptions: "Scale=0.80"
+    linestretch: 1.2
+    indent: false
+    toc: true
+    toc-depth: 3
+    toc-title: "Índice de contenidos"
+    number-sections: true
+    colorlinks: true
+    linkcolor: "NavyBlue"
+    urlcolor: "NavyBlue"
+    citecolor: "NavyBlue"
+    highlight-style: tango
+    code-block-border-left: "#457B9D"
+    code-block-bg: "#F7F9FC"
+    include-in-header:
+      text: |
+        \usepackage{booktabs}
+        \usepackage{longtable}
+        \usepackage{array}
+        \usepackage{multirow}
+        \usepackage{microtype}
+        \usepackage{float}
+        \usepackage{caption}
+        \usepackage{fancyhdr}
+        \usepackage{etoolbox}
+        \usepackage{fvextra}
+        \usepackage{graphicx}
+        \usepackage{xcolor}
+        \usepackage{tikz}
+        \captionsetup{font=small, labelfont=bf, skip=5pt}
+        \captionsetup[table]{position=top}
+        \pagestyle{fancy}
+        \fancyhf{}
+        \fancyhead[L]{\small\textit{Visualización con quanteda · A. Cabedo Nebot}}
+        \fancyhead[R]{\small\textit{Universitat de València}}
+        \fancyfoot[C]{\thepage}
+        \renewcommand{\headrulewidth}{0.4pt}
+        \setlength{\headheight}{14pt}
+        \AtBeginDocument{\let\maketitle\relax}
+        \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+          commandchars=\\\{\},
+          breaklines=true,
+          breakanywhere=true,
+          fontsize=\scriptsize,
+          breaksymbol=\small\ensuremath{\hookrightarrow},
+          breaksymbolindent=0pt,
+          breaksymbolright=\small\ensuremath{\hookrightarrow}
+        }
+    include-before-body:
+      text: |
+        \begin{titlepage}
+        \thispagestyle{empty}
+        \begin{tikzpicture}[remember picture, overlay]
+          \fill[color={rgb,255:red,29;green,53;blue,87}]
+            (current page.north west) rectangle
+            ([yshift=-8cm] current page.north east);
+          \fill[color={rgb,255:red,230;green,57;blue,70}]
+            ([yshift=-8cm] current page.north west) rectangle
+            ([yshift=-8.5cm] current page.north east);
+          \node[anchor=north west, text width=14cm, align=left]
+            at ([xshift=3cm, yshift=-2.5cm] current page.north west) {
+              {\color{white}\fontsize{11}{14}\selectfont\textit{Universitat de València}}\\[0.3cm]
+              {\color{white}\fontsize{11}{14}\selectfont\textit{Departamento de Filología Española}}
+            };
+          \node[anchor=north west, text width=14cm, align=left]
+            at ([xshift=3cm, yshift=-4.5cm] current page.north west) {
+              {\color{white}\fontsize{24}{30}\bfseries\selectfont
+                Visualización de datos textuales\\[0.2cm]
+                con \texttt{quanteda}}
+            };
+          \node[anchor=north west, text width=13cm, align=left]
+            at ([xshift=3cm, yshift=-7cm] current page.north west) {
+              {\color{white}\fontsize{13}{17}\selectfont
+                Réplica de la guía oficial aplicada al corpus\\
+                de discursos de investidura (Rajoy y Sánchez, 2011--2023)}
+            };
+        \end{tikzpicture}
+        \vspace*{9.5cm}
+        \begin{flushleft}
+        \hspace{3cm}{\fontsize{14}{18}\bfseries\selectfont Adrián Cabedo Nebot}\\[0.4cm]
+        \hspace{3cm}{\fontsize{11}{14}\selectfont\textit{Universitat de València}}\\[0.2cm]
+        \hspace{3cm}{\fontsize{11}{14}\selectfont\texttt{adrian.cabedo@uv.es}}\\[0.2cm]
+        \hspace{3cm}{\fontsize{11}{14}\selectfont\today}
+        \end{flushleft}
+        \vfill
+        \begin{center}
+        \textcolor{gray}{\rule{12cm}{0.4pt}}\\[0.3cm]
+        {\small\textcolor{gray}{Análisis reproducible · R + quanteda + quanteda.extras}}
+        \end{center}
+        \end{titlepage}
+        \newpage
+        \pagestyle{fancy}
+
+execute:
+  echo: true
+  warning: false
+  message: false
+
+knitr:
+  opts_chunk:
+    out.width: "\\textwidth"
+    fig.align: "center"
+    fig.pos: "H"
+    fig.width: 8
+    fig.dpi: 300
+    fig.height: 6
+    tidy: false
+    size: "footnotesize"
+---
+
+```{r setup, include=T}
+# ── Opciones globales ──────────────────────────────────────────────────────
+options(width = 72)
+knitr::opts_chunk$set(
+  comment   = "#>",
+  fig.pos   = "H",
+  out.width = "\\textwidth",
+  fig.align = "center"
+)
+
+# ── Paquetes ───────────────────────────────────────────────────────────────
+library(tidyverse)
+library(quanteda)
+library(quanteda.textstats)
+library(quanteda.textplots)
+library(quanteda.textmodels)
+library(ggplot2)
+library(ggrepel)
+library(kableExtra)
+
+# ── Paleta ─────────────────────────────────────────────────────────────────
+PAL <- c("Rajoy" = "#1D3557", "Sanchez" = "#E63946")
+theme_set(theme_bw(base_size = 10))
+
+# ── Función auxiliar de tablas (definida también en helpers.R) ─────────────
+source("helpers.R")
+
+rutas <- c(
+  Rajoy_2011   = "2011_Rajoy.txt",
+  Rajoy_2016a  = "2016_Rajoy.txt",
+  Rajoy_2016b  = "2016b_Rajoy.txt",
+  Sanchez_2020 = "2020_Sánchez.txt",
+  Sanchez_2023 = "2023_Sánchez.txt"
+)
+
+textos <- map_chr(rutas, function(r) {
+  if (!file.exists(r)) return("")
+  paste(readLines(r, encoding="UTF-8", warn=FALSE), collapse=" ")
+})
+
+# Corpus quanteda con metadatos
+corp <- corpus(textos, docnames=names(rutas))
+docvars(corp, "Orador") <- c("Rajoy","Rajoy","Rajoy","Sanchez","Sanchez")
+docvars(corp, "Año")    <- c(2011L, 2016L, 2016L, 2020L, 2023L)
+docvars(corp, "Discurso") <- names(rutas)
+
+# Tokens y DFM
+toks <- tokens(corp, remove_punct=TRUE, remove_numbers=TRUE) |>
+  tokens_tolower() |>
+  tokens_remove(stopwords("es"))
+
+dfm_corp <- dfm(toks)
+```
+
+\begin{abstract}
+Este informe replica la vignette oficial de \texttt{quanteda} sobre visualización textual,
+aplicada al corpus de cinco discursos de investidura: Rajoy (2011, 2016a, 2016b) y
+Sánchez (2020, 2023). Cada sección reproduce uno de los tipos de visualización de la
+guía oficial usando las funciones \texttt{textplot\_*} de \texttt{quanteda.textplots},
+y añade al final un bloque de análisis avanzado con \texttt{quanteda.extras}.
+El código es completamente reproducible a partir de los archivos de texto originales.
+\end{abstract}
+
+\newpage
+
+> Este informe replica la **vignette oficial de quanteda** ([quanteda.io/articles/pkgdown/examples/plotting.html](https://quanteda.io/articles/pkgdown/examples/plotting.html)) aplicada a los cinco discursos de investidura de Rajoy (2011, 2016a, 2016b) y Sánchez (2020, 2023).
+
+
+# Wordcloud
+
+> **Sección 1 de la vignette:** la frecuencia de los rasgos léxicos puede representarse como una nube de palabras con `textplot_wordcloud()`.
+
+## Nube de palabras del corpus completo
+
+```{r wordcloud-global, fig.height=5, fig.width=5.5}
+# Aplicamos un trim para mostrar solo palabras frecuentes
+dfm_trimmed <- dfm_trim(dfm_corp, min_termfreq=10, verbose=FALSE)
+
+set.seed(100)
+textplot_wordcloud(dfm_trimmed,
+                   color = c("#1D3557","#457B9D","#A8DADC","#E63946","#C1121F"))
+```
+
+## Nube comparativa por orador
+
+> La nube **comparativa** (`comparison = TRUE`) muestra qué palabras son distintivas de cada orador. Solo funciona con menos de 8 documentos.
+
+```{r wordcloud-comparativa, fig.height=5, fig.width=5.5}
+# Agrupamos por orador y aplicamos trim
+dfm_comp <- dfm_corp |>
+  dfm_group(groups = docvars(dfm_corp, "Orador")) |>
+  dfm_trim(min_termfreq = 5, verbose = FALSE)
+
+set.seed(100)
+textplot_wordcloud(dfm_comp,
+                   comparison = TRUE,
+                   color = c("Rajoy" = "#1D3557", "Sanchez" = "#E63946"),
+                   max_words = 150)
+```
+
+# Gráfico de dispersión léxica (X-ray)
+
+> **Sección 2 de la vignette:** `textplot_xray()` representa las ocurrencias de un término a lo largo del texto, similar a la función "X-Ray" de Amazon Kindle.
+
+## Dispersión de "España" en los cinco discursos
+
+```{r xray-espana, fig.height=3.5, fig.width=7}
+# textplot_xray necesita el corpus tokenizado SIN remover stopwords
+# para preservar las posiciones absolutas
+toks_full <- tokens(corp, remove_punct=TRUE)
+
+kwic(toks_full, pattern = "españa") |>
+  textplot_xray()
+```
+
+## Comparación de varias palabras clave
+
+> Pasando varios objetos `kwic` se pueden comparar varias palabras simultáneamente.
+
+```{r xray-multiple, fig.height=4, fig.width=7}
+textplot_xray(
+  kwic(toks_full, pattern = "españa"),
+  kwic(toks_full, pattern = "ciudadanos"),
+  kwic(toks_full, pattern = "reforma")
+)
+```
+
+## Coloreando el gráfico
+
+> El objeto devuelto es un `ggplot`, modificable con sintaxis ggplot2.
+
+```{r xray-color, fig.height=4, fig.width=7}
+g <- textplot_xray(
+  kwic(toks_full, pattern = "españa"),
+  kwic(toks_full, pattern = "ciudadanos"),
+  kwic(toks_full, pattern = "reforma")
+)
+
+g + aes(color = keyword) +
+  scale_color_manual(values = c("#1D3557", "#E63946", "#2a9d8f")) +
+  theme(legend.position = "none",
+        strip.text = element_text(face = "bold", size = 10))
+```
+
+# Gráficos de frecuencia
+
+> **Sección 3 de la vignette:** se puede representar la frecuencia de los rasgos más comunes con `textstat_frequency()`.
+
+## Top 30 palabras más frecuentes
+
+```{r freq-top, fig.height=6, fig.width=6}
+tstat_freq <- textstat_frequency(dfm_corp, n = 30)
+
+ggplot(tstat_freq,
+       aes(x = frequency, y = reorder(feature, frequency))) +
+  geom_point(color = "#1D3557", size = 3) +
+  geom_segment(aes(x = 0, xend = frequency, yend = feature),
+               color = "#A8DADC", linewidth = 0.5) +
+  labs(x = "Frecuencia bruta", y = "Palabra",
+       title = "Las 30 palabras más frecuentes del corpus",
+       subtitle = "Sin stopwords · Calculado con textstat_frequency()")
+```
+
+## Frecuencia bruta de un término por orador
+
+> Filtrar `textstat_frequency()` agrupado por una variable permite ver cómo varía un término concreto entre grupos.
+
+```{r freq-por-orador, fig.height=4, fig.width=8}
+freq_grouped <- textstat_frequency(dfm_corp,
+                                   groups = docvars(dfm_corp, "Orador"))
+
+# Filtrar varias palabras clave
+palabras_interes <- c("españa", "ciudadanos", "reforma", "cambio")
+freq_palabras <- subset(freq_grouped,
+                         freq_grouped$feature %in% palabras_interes)
+
+ggplot(freq_palabras, aes(x = frequency, y = group, color = group)) +
+  geom_point(size = 4) +
+  facet_wrap(~feature, scales = "free_x") +
+  scale_color_manual(values = PAL, guide = "none") +
+  labs(x = "Frecuencia bruta", y = NULL,
+       title = "Frecuencia de varios términos clave por orador",
+       subtitle = "Frecuencia BRUTA · Cuidado: los corpus tienen distinto tamaño")
+```
+
+## Frecuencia relativa por orador (%)
+
+> Para comparar entre corpus de distinto tamaño se debe **ponderar** la DFM con `dfm_weight(scheme="prop")`. Multiplicando por 100 se obtiene el porcentaje.
+
+```{r freq-relativa, fig.height=7, fig.width=8}
+dfm_grp  <- dfm_group(dfm_corp, groups = docvars(dfm_corp, "Orador"))
+dfm_rel  <- dfm_weight(dfm_grp,  scheme = "prop") * 100
+
+rel_freq <- textstat_frequency(dfm_rel, groups = docvars(dfm_rel, "Orador"))
+rel_freq_palabras <- subset(rel_freq, feature %in% palabras_interes)
+
+ggplot(rel_freq_palabras, aes(x = group, y = frequency, fill = group)) +
+  geom_col(width = 0.6, alpha = 0.85) +
+  geom_text(aes(label = round(frequency, 2)), vjust = -0.4, size = 3.5) +
+  facet_wrap(~feature, scales = "free_y") +
+  scale_fill_manual(values = PAL, guide = "none") +
+  labs(x = NULL, y = "Frecuencia relativa (%)",
+       title = "Frecuencia relativa de términos clave por orador",
+       subtitle = "% sobre el total de tokens del orador · Comparación válida")
+```
+
+## Top 10 palabras más frecuentes por orador
+
+> Reproduce la última figura de la sección 3 de la vignette: top 10 palabras de cada presidente con `facet_wrap`.
+
+```{r freq-top10-orador, fig.height=6, fig.width=8}
+dfm_orador_weight <- dfm_corp |>
+  dfm_group(groups = docvars(dfm_corp, "Orador")) |>
+  dfm_weight(scheme = "prop")
+
+dat_freq_weight <- textstat_frequency(dfm_orador_weight,
+                                      n = 10,
+                                      groups = dfm_orador_weight$Orador)
+
+dat_freq_weight |>
+  mutate(rownum = nrow(dat_freq_weight):1) |>
+  ggplot(aes(x = rownum, y = frequency, color = group)) +
+  geom_point(size = 3.5) +
+  geom_segment(aes(xend = rownum, y = 0, yend = frequency),
+               linewidth = 0.5, alpha = 0.5) +
+  facet_wrap(~group, scales = "free") +
+  coord_flip() +
+  scale_x_continuous(breaks = nrow(dat_freq_weight):1,
+                     labels = dat_freq_weight$feature) +
+  scale_color_manual(values = PAL, guide = "none") +
+  labs(x = NULL, y = "Frecuencia relativa",
+       title = "Top 10 palabras por orador",
+       subtitle = "Frecuencia relativa (proporción)")
+```
+
+# Keyness: comparación foco vs. referencia
+
+> **Sección 4 de la vignette:** `textstat_keyness()` calcula la asociación diferencial de palabras entre un grupo foco y un grupo de referencia. Aquí: Sánchez (foco) vs. Rajoy (referencia).
+
+```{r keyness, fig.height=6, fig.width=6.5}
+# Agrupar por orador y calcular keyness
+dfm_pres <- dfm_corp |>
+  dfm_group(groups = docvars(dfm_corp, "Orador"))
+
+tstat_keyness <- textstat_keyness(dfm_pres, target = "Sanchez")
+
+# Plot oficial de quanteda.textplots
+textplot_keyness(tstat_keyness,
+                 n = 20,
+                 color = c("#E63946", "#1D3557"),
+                 labelsize = 3)
+```
+
+## Keyness sin mostrar el grupo de referencia
+
+```{r keyness-sin-ref, fig.height=5, fig.width=6.5}
+textplot_keyness(tstat_keyness,
+                 n = 20,
+                 show_reference = FALSE,
+                 color = c("#E63946"),
+                 labelsize = 3)
+```
+
+
+
+## Lecturas recomendadas
+
+- Vignette original: [quanteda.io/articles/pkgdown/examples/plotting.html](https://quanteda.io/articles/pkgdown/examples/plotting.html)
+- Laver, M., Benoit, K., & Garry, J. (2003). Extracting policy positions from political texts using words as data. *American Political Science Review* 97(2): 311–331.
+- Slapin, J. & Proksch, S.-O. (2008). A scaling model for estimating time-series party positions from texts. *American Journal of Political Science* 52(3): 705–772.
+- Nenadic, O. & Greenacre, M. (2007). Correspondence analysis in R, with two- and three-dimensional graphics: The ca package. *Journal of Statistical Software* 20(3): 1–13.
+
+# Análisis avanzado con `quanteda.extras`
+
+> El paquete **`quanteda.extras`** ([browndw/quanteda.extras](https://github.com/browndw/quanteda.extras)) extiende quanteda con funciones avanzadas para análisis estadístico de corpus. Esta sección aplica todas sus funciones principales al corpus de discursos de investidura.
+
+```{r quanteda-extras-setup, include=FALSE}
+# Instalación (si no lo tienes ya):
+# devtools::install_github("browndw/quanteda.extras")
+library(quanteda.extras)
+source("helpers.R")   # garantiza que kt() está disponible en esta sesión
+```
+
+## Preprocesamiento estandarizado: `preprocess_text()`
+
+> Limpia el texto antes de tokenizar: separa contracciones, puntuación, normaliza tildes opcionalmente. Permite procesos reproducibles.
+
+```{r preprocess}
+# Aplicar el preprocesamiento estandarizado al corpus
+textos_clean <- map_chr(textos, ~ preprocess_text(.x,
+                                  contractions   = TRUE,
+                                  hypens         = TRUE,
+                                  punctuation    = TRUE,
+                                  lower_case     = TRUE,
+                                  accent_replace = FALSE,  # mantenemos tildes en español
+                                  remove_numbers = TRUE))
+
+# Comparar primer fragmento antes/después
+tibble(
+  Original  = str_trunc(textos[1],      80),
+  Procesado = str_trunc(textos_clean[1], 80)
+) |>
+  kt(caption = "Primeros 80 caracteres antes y después del preprocesamiento",
+     font_size = 8) |>
+  column_spec(1, width = "6cm") |>
+  column_spec(2, width = "6cm")
+```
+
+## Tabla de frecuencias enriquecida: `frequency_table()`
+
+> A diferencia de `textstat_frequency()` de quanteda, `frequency_table()` añade dos medidas más: **Average Reduced Frequency (ARF)** que combina frecuencia y dispersión, y **Deviation of Proportions (DP)** que cuantifica cómo de uniforme es la distribución de la palabra a lo largo del corpus.
+
+```{r frequency-table}
+freq_tbl <- frequency_table(toks)
+
+# Top 20 palabras con todas las medidas
+freq_tbl |>
+  head(20) |>
+  kt(caption = "Top 20: frecuencia bruta, relativa, ARF y DP", digits = 3,
+      col.names = c("Palabra","Frec. abs.","Frec. rel. (per 10k)","ARF","DP"))
+```
+
+> **Lectura:** la columna `ARF` (Average Reduced Frequency) penaliza las palabras concentradas en pocos textos. Una palabra con alta frecuencia pero baja ARF aparece muchas veces pero solo en uno o dos discursos.
+
+## Dispersión: `dispersions_all()` y `dispersions_token()`
+
+### Dispersión para todos los tokens
+
+```{r dispersions-all}
+disp_all <- dispersions_all(dfm_corp)
+
+# Las 10 palabras MÁS dispersas (DP cercano a 0 = uniformes)
+disp_all |>
+  arrange(DP) |>
+  head(10) |>
+  kt(caption = "Las 10 palabras más uniformemente distribuidas (DP bajo)", digits = 4, scale = TRUE)
+```
+
+```{r dispersion-grafico, fig.height=4, fig.width=6.5}
+# Relación entre frecuencia y dispersión
+disp_all |>
+  filter(AF >= 10) |>     # solo palabras con al menos 10 ocurrencias
+  ggplot(aes(x = AF, y = DP)) +
+  geom_point(alpha = 0.4, color = "#457B9D") +
+  geom_text_repel(data = ~ slice_min(.x, DP, n = 10),
+                  aes(label = Token), color = "#1D3557",
+                  size = 3, max.overlaps = 15) +
+  geom_text_repel(data = ~ filter(.x, DP > 0.7) |> slice_max(AF, n = 8),
+                  aes(label = Token), color = "#E63946",
+                  size = 3, max.overlaps = 15) +
+  scale_x_log10() +
+  labs(title = "Frecuencia vs. dispersión (DP)",
+       subtitle = "Azul: palabras bien dispersas · Rojo: concentradas en pocos textos",
+       x = "Frecuencia absoluta (escala log)",
+       y = "Deviation of Proportions (DP)")
+```
+
+### Dispersión detallada de un token: `dispersions_token()`
+
+```{r dispersions-token}
+# Análisis detallado de "españa"
+disp_espana <- dispersions_token(dfm_corp, "españa")
+
+# Convertir lista a data frame para mostrar
+tibble(
+  Medida = names(disp_espana),
+  Valor  = unlist(disp_espana)
+) |>
+  kt(caption = 'Medidas de dispersión completas para "españa"', digits = 4)
+```
+
+> **Interpretación:** la función devuelve >10 medidas distintas de dispersión (Juilland's D, Carroll's D2, Rosengren's S, DP, DP_norm, etc.) que permiten un análisis exhaustivo del comportamiento distributivo de un término.
+
+## Medidas de dispersión (`dispersions_token()`)
+
+Las medidas de dispersión cuantifican cómo se distribuye una palabra a lo largo de los distintos textos del corpus. Una palabra perfectamente dispersa aparece con la misma frecuencia en todos los documentos; una palabra concentrada aparece muchas veces en uno o dos textos y apenas en el resto.
+
+### Medidas de frecuencia base
+
+| Medida | Descripción |
+|---|---|
+| **Absolute frequency** | Número total de ocurrencias de la palabra en el corpus. |
+| **Per 10⁴** | Frecuencia relativa por cada 10.000 tokens. Permite comparar corpus de distinto tamaño. |
+| **Range** | Número de documentos del corpus en los que aparece la palabra al menos una vez. Máximo = número total de documentos. |
+| **Maxmin** | Diferencia entre la frecuencia máxima y la mínima entre documentos. Valores altos indican concentración en pocos textos. |
+| **Standard deviation** | Desviación típica de la frecuencia entre documentos. |
+| **Variation coefficient** | Desviación típica dividida entre la media (= CV). Normaliza la variabilidad; independiente de la escala de frecuencia. |
+| **Chi-square** | Test χ² sobre la distribución observada de la palabra entre documentos vs. distribución esperada uniforme. Valores altos → distribución no uniforme. |
+
+### Medidas de dispersión normalizadas (rango 0–1)
+
+Todas las medidas siguientes oscilan entre 0 y 1. **Valores próximos a 1 indican alta dispersión** (la palabra está bien repartida entre los documentos); **valores próximos a 0 indican concentración** en pocos textos.
+
+| Medida | Descripción breve |
+|---|---|
+| **Relative entropy** | Entropía de la distribución de frecuencias entre partes del corpus, normalizada. 1 = distribución perfectamente uniforme. |
+| **Juilland et al.'s D** (partes iguales) | Primera medida de dispersión de la bibliografía (Juilland & Chang-Rodriguez, 1964). Requiere dividir el corpus en partes de igual tamaño. |
+| **Juilland et al.'s D** (partes desiguales) | Variante de D que no exige partes de igual tamaño; más adecuada para corpus desequilibrados como el nuestro. |
+| **Carroll's D2** | Medida de dispersión basada en entropía (Carroll, 1970). Muy estable; no requiere igualdad de tamaños. |
+| **Rosengren's S** (partes iguales) | Basada en la media geométrica de las proporciones (Rosengren, 1971). Requiere partes iguales. |
+| **Rosengren's S** (partes desiguales) | Variante de S para corpus desequilibrados. |
+| **Lyne's D3** | Variante de D3 (Lyne, 1985) que no exige partes iguales. Combina varianza y media. |
+| **Distributional consistency DC** | Propuesta por Lijffijt & Gries (2012). Penaliza la varianza de la distribución. Equivalente conceptual a Rosengren's S. |
+| **Inverse document frequency IDF** | log(N / df), donde N = número de documentos y df = número de documentos con la palabra. IDF = 0 significa que la palabra aparece en **todos** los documentos (máxima dispersión en este sentido). |
+
+### Frecuencias ajustadas por dispersión
+
+Estas medidas combinan frecuencia bruta y dispersión en un único número. Son más informativas que la frecuencia sola porque **penalizan las palabras concentradas en pocos textos**.
+
+| Medida | Descripción |
+|---|---|
+| **Engvall's measure** | Frecuencia bruta × D de Juilland (partes iguales). Penaliza la concentración. |
+| **Juilland et al.'s U** (partes iguales) | Frecuencia absoluta ponderada por D (partes iguales). Equivale a *frequency × D*. |
+| **Juilland et al.'s U** (partes desiguales) | Ídem, con D calculado para partes desiguales. |
+| **Carroll's Um** | Frecuencia absoluta ponderada por D2 de Carroll. |
+| **Rosengren's Adjusted Frequency** (partes iguales) | Frecuencia ajustada por S de Rosengren (partes iguales). |
+| **Rosengren's Adjusted Frequency** (partes desiguales) | Ídem, con S para partes desiguales. |
+| **Kromer's Ur** | Media armónica de las frecuencias por documento (Kromer, 2003). Penaliza fuertemente la concentración; valor bajo = palabra muy irregular. |
+
+### Deviation of Proportions (Gries, 2008)
+
+| Medida | Descripción |
+|---|---|
+| **DP** | Suma de las diferencias absolutas entre la proporción observada de la palabra en cada parte y la proporción esperada si estuviera uniformemente distribuida. **DP = 0** → distribución perfectamente uniforme; **DP = 1** → concentración máxima en un único documento. |
+| **DP (normalized)** | DP dividido por su valor máximo teórico, lo que la hace comparable entre corpus de distinto número de partes. Es la medida recomendada por Gries (2008) y la más utilizada en lingüística de corpus actual. |
+
+> **¿Qué medida usar?** Para lingüística de corpus, la recomendación estándar (Gries, 2008; Lijffijt & Gries, 2012) es usar **DP normalizado** como medida de dispersión y **Rosengren's Adjusted Frequency** o **Juilland's U** como frecuencia ajustada. En Sketch Engine se reporta habitualmente **ARF** (Average Reduced Frequency), que es conceptualmente equivalente a Rosengren's Adjusted Frequency para partes no iguales.
+
+### Referencias
+
+- Carroll, J. B. (1970). An alternative to Juilland's usage coefficient for lexical frequencies. *Computer Studies in the Humanities and Verbal Behaviour*, 3, 61–65.
+- Gries, S. T. (2008). Dispersions and adjusted frequencies in corpora. *International Journal of Corpus Linguistics*, 13(4), 403–437.
+- Juilland, A., & Chang-Rodriguez, E. (1964). *Frequency Dictionary of Spanish Words*. Mouton.
+- Lijffijt, J., & Gries, S. T. (2012). Correction to Stefan Th. Gries' "dispersions and adjusted frequencies in corpora". *International Journal of Corpus Linguistics*, 17(1), 147–149.
+- Lyne, A. A. (1985). The vocabulary of French business correspondence. Slatkine-Champion.
+- Rosengren, I. (1971). The quantitative concept of language and its relation to the structure of frequency dictionaries. *Études de linguistique appliquée*, 1, 103–127.
+
+## Keyness completa: `keyness_table()`
+
+> A diferencia de `textstat_keyness()` que solo da un estadístico, `keyness_table()` devuelve **LL, log-ratio, p-valor, frecuencias absolutas, frecuencias relativas y dispersiones (DP)** para ambos corpus en una sola llamada.
+
+```{r keyness-table}
+if (!exists("kt") || !is.function(kt)) source("helpers.R")
+
+# Construir DFMs separadas para target (Sánchez) y reference (Rajoy)
+mask_san <- docvars(toks, "Orador") == "Sanchez"
+toks_san <- toks[mask_san]
+toks_raj <- toks[!mask_san]
+
+dfm_san <- dfm(toks_san)
+dfm_raj <- dfm(toks_raj)
+
+# keyness_table: target = Sánchez, reference = Rajoy
+# Renombrado a kt_data para no sobreescribir la función kt()
+kt_data <- keyness_table(dfm_san, dfm_raj, yates = FALSE)
+
+# Top 15 palabras clave de Sánchez (LL más alto, LR positivo)
+kt_data |>
+  filter(LR > 0) |>
+  arrange(desc(LL)) |>
+  head(15) |>
+  kt(caption = "Top 15 palabras clave de Sánchez (LL + LR + DP en una llamada)",
+     digits = 3, scale = TRUE)
+```
+
+```{r keyness-table-rajoy}
+# Top 15 palabras clave de Rajoy (LR negativo en este encuadre)
+kt_data |>
+  filter(LR < 0) |>
+  arrange(desc(LL)) |>
+  head(15) |>
+  kt(caption = "Top 15 palabras clave de Rajoy", digits = 3, scale = TRUE)
+```
+
+## Palabras clave por orador: `keyness_table()`
+
+La tabla muestra los resultados de `keyness_table()` de `quanteda.extras`, que a diferencia de `textstat_keyness()` de quanteda base devuelve en una sola llamada **significación estadística, tamaño del efecto y dispersión** para ambos corpus simultáneamente.
+
+El corpus **foco es Sánchez** (2020 + 2023) y el corpus de **referencia es Rajoy** (2011 + 2016a + 2016b). Las filas de la primera tabla están ordenadas de mayor a menor LL entre las palabras más frecuentes en Sánchez; las de la segunda tabla, entre las más frecuentes en Rajoy.
+
+---
+
+### Las columnas
+
+**`Token`** — La palabra analizada.
+
+**`LL`** — Log-likelihood. Mide la **significación estadística** de la diferencia de frecuencia entre los dos corpus. Valores positivos: la palabra es más frecuente en el foco (Sánchez). Valores negativos: más frecuente en la referencia (Rajoy). Umbral habitual: LL ≥ 15.13 equivale a p < 0.0001.
+
+**`LR`** — Log-ratio. Mide el **tamaño del efecto**: cuántas veces más frecuente es la palabra en un corpus que en el otro, en escala logarítmica en base 2. LR = 1 → el doble de frecuente; LR = 2 → cuatro veces más. LR negativo indica mayor frecuencia en Rajoy.
+
+**`PV`** — P-value asociado al LL. PV = 0 significa p < 0.0001 (redondeado); valores cercanos a 1 indican diferencia no significativa.
+
+**`AF_Tar`** / **`AF_Ref`** — Frecuencia absoluta (absolute frequency) en el corpus foco (Sánchez) y en el corpus de referencia (Rajoy) respectivamente.
+
+**`Per_10.4_Tar`** / **`Per_10.4_Ref`** — Frecuencia normalizada por cada 10.000 tokens en el corpus foco y en el de referencia. Permite comparar los dos corpus con independencia de su tamaño.
+
+**`DP_Tar`** / **`DP_Ref`** — Deviation of Proportions en el corpus foco y en el de referencia. Mide cómo de **dispersa** está la palabra dentro de cada corpus: DP = 0 significa distribución perfectamente uniforme entre todos los textos; DP = 1 significa concentración total en un único texto. El valor `NA` en `DP_Ref` aparece cuando la palabra tiene frecuencia cero en Rajoy: sin ocurrencias, la dispersión no se puede calcular.
+
+---
+
+### Top 15 de Sánchez: interpretación
+
+Las primeras filas son las palabras **más significativas y más exclusivas** del discurso de Sánchez.
+
+**«Vamos»** encabeza la lista con enorme diferencia: LL = 177.8, AF_Tar = 181 frente a AF_Ref = 7. Es la palabra más discriminadora en términos estadísticos. Su DP_Tar = 0.018 es el más bajo de la tabla, lo que indica que está **uniformemente distribuida** en ambos discursos de Sánchez: no es un tema de un discurso concreto sino un rasgo estilístico constante, un marcador discursivo de apelación directa al auditorio.
+
+**Palabras con AF_Ref = 0** (y `NA` en DP_Ref): *progresista*, *derecha*, *ultraderecha*, *vox*, *transición*, *lógicamente*, *salud*, *derechas*, *pido* → **no aparecen ni una sola vez en ningún discurso de Rajoy**. Su LR muy alto (entre 4.4 y 6.1) refleja esa exclusividad total. Son el vocabulario más diagnóstico del registro político de Sánchez.
+
+**Dispersión interna heterogénea:** dentro de las palabras de Sánchez, el DP varía notablemente. *«Ultraderecha»* y *«vox»* tienen DP_Tar = 0.47 y 0.52 respectivamente, lo que indica que están **concentradas en uno de los dos discursos** (probablemente 2023, donde el contexto político hace más saliente esa referencia). En cambio, *«vamos»* (0.018), *«transición»* (0.021) y *«tampoco»* (0.021) están presentes de forma muy uniforme.
+
+---
+
+### Top 15 de Rajoy: interpretación
+
+La tabla de Rajoy presenta un patrón radicalmente distinto y merece atención especial.
+
+**LL cercano a cero y p-values altos:** ninguna de las 15 palabras alcanza significación estadística convencional. Los LL oscilan entre 0.000 y −0.010, y todos los p-values son superiores a 0.90. Esto **no significa que estas palabras sean irrelevantes**: significa que son palabras que Rajoy y Sánchez usan con frecuencias muy similares, y que por tanto no discriminan entre los dos oradores.
+
+**¿Por qué aparecen aquí entonces?** `keyness_table()` con `LR < 0` selecciona las palabras más frecuentes en Rajoy en términos **relativos**, pero si la diferencia de frecuencias es minúscula, el LL y el LR serán también minúsculos. El corpus de Rajoy es más grande (3 discursos frente a 2), lo que hace que muchas palabras comunes sean ligeramente más frecuentes en términos absolutos en Rajoy, pero la diferencia normalizada es estadísticamente trivial.
+
+**Interpretación lingüística:** el contraste entre las dos tablas es en sí mismo un resultado. Sánchez tiene un **léxico clave muy marcado y exclusivo**; Rajoy, en cambio, comparte con Sánchez la mayor parte de su vocabulario más frecuente. Esto puede interpretarse de dos maneras: bien que el discurso de Rajoy es léxicamente más neutro o genérico, bien que el corpus de Rajoy (más fragmentado en tres discursos de distintos años) diluye las peculiaridades de cada uno.
+
+---
+
+### Referencia
+
+Gries, S. T. (2008). Dispersions and adjusted frequencies in corpora. *International Journal of Corpus Linguistics*, 13(4), 403–437.
+
+## Comparación múltiple: `keyness_pairs()`
+
+> Cuando tenemos **3 o más** sub-corpus, `keyness_pairs()` calcula todas las comparaciones por pares en una sola tabla. Ideal para comparar discurso a discurso.
+
+```{r keyness-pairs}
+# Crear DFMs separadas por discurso
+dfms_por_discurso <- map(docnames(dfm_corp), ~ dfm_subset(dfm_corp, docnames(dfm_corp) == .x))
+names(dfms_por_discurso) <- docnames(dfm_corp)
+
+# Solo comparamos 3 discursos para no saturar la tabla
+kp <- keyness_pairs(dfms_por_discurso[["Rajoy_2011"]],
+                    dfms_por_discurso[["Sanchez_2020"]],
+                    dfms_por_discurso[["Sanchez_2023"]])
+
+# Mostrar las 20 palabras con mayor variabilidad entre los 3 discursos
+kp |>
+  head(20) |>
+  kt(caption = "Comparación pareada Rajoy 2011 / Sánchez 2020 / Sánchez 2023",
+      digits = 2, scale = TRUE, land = TRUE)
+```
+
+## Comparación pareada de keyness (`keyness_pairs()`)
+
+La tabla muestra los resultados de `keyness_pairs()`, que calcula la *keyness* de forma **exhaustiva entre todos los pares posibles** de sub-corpus. En lugar de comparar un corpus foco contra uno de referencia, como hace `keyness_table()`, esta función realiza **todas las comparaciones por pares** y presenta los resultados en columnas paralelas.
+
+### Los tres corpus comparados
+
+| Etiqueta | Corpus |
+|---|---|
+| **A** | Rajoy 2011 |
+| **B** | Sánchez 2020 |
+| **C** | Sánchez 2023 |
+
+Esto genera tres comparaciones:
+
+- **A vs. B** → Rajoy 2011 frente a Sánchez 2020
+- **A vs. C** → Rajoy 2011 frente a Sánchez 2023
+- **B vs. C** → Sánchez 2020 frente a Sánchez 2023
+
+---
+
+### Las columnas
+
+Cada comparación produce tres métricas. El patrón se repite para cada par:
+
+**`_LL`** (Log-likelihood) — Significación estadística de la diferencia de frecuencia entre los dos corpus. Valores altos indican que la diferencia es muy improbable por azar. El **signo** indica la dirección: positivo significa que la palabra es más frecuente en el primer corpus del par (A o B según corresponda); negativo, que es más frecuente en el segundo.
+
+**`_LR`** (Log-ratio) — Tamaño del efecto. Indica cuántas veces más frecuente es la palabra en un corpus que en el otro, en escala logarítmica. LR = 1 equivale al doble de frecuente; LR = 2, cuatro veces más frecuente. El signo sigue la misma convención que LL.
+
+**`_PV`** (p-value) — Valor p asociado al LL. PV = 0 significa p < 0.0001 (redondeado); PV = 0.25 significa que la diferencia no es estadísticamente significativa a ningún umbral convencional.
+
+---
+
+### Cómo leer una fila concreta
+
+Tomemos *«deuda»* como ejemplo:
+
+| Comparación | LL | LR | p |
+|---|---|---|---|
+| A vs. B (Rajoy 2011 vs. Sánchez 2020) | 18.79 | 4.96 | 0.000 |
+| A vs. C (Rajoy 2011 vs. Sánchez 2023) | 5.27 | 1.84 | 0.020 |
+| B vs. C (Sánchez 2020 vs. Sánchez 2023) | −5.89 | −3.12 | 0.020 |
+
+Lectura: *«deuda»* es significativamente más frecuente en Rajoy 2011 que en cualquiera de los dos discursos de Sánchez (LL positivo en A vs. B y A vs. C). Pero dentro de los discursos de Sánchez hay también una diferencia significativa (B vs. C con LL = −5.89): el signo negativo indica que es más frecuente en **C** (Sánchez 2023) que en B (Sánchez 2020), aunque en ambos casos mucho menos que en Rajoy.
+
+---
+
+### Interpretación lingüística del conjunto
+
+La tabla está ordenada por `A_v_B_LL`, por lo que las primeras filas son las palabras que más distinguen a **Rajoy 2011 de Sánchez 2020**. Hay tres patrones claros:
+
+**Léxico macroeconómico de Rajoy:** *déficit*, *deuda*, *presupuestos*, *estabilidad*, *presupuestaria*, *competitividad*, *costes*, *reformas*, *laboral* → todas con LL positivo alto en A vs. B y A vs. C, lo que indica que son características de Rajoy frente a **ambos** discursos de Sánchez. Rajoy construye un discurso centrado en el ajuste económico y la disciplina fiscal.
+
+**Estabilidad diacrónica de Rajoy vs. Sánchez:** para la mayoría de estas palabras, los valores de B vs. C tienen LL bajo y p-value alto (p > 0.20), lo que significa que **Sánchez 2020 y Sánchez 2023 no difieren significativamente** en su uso. El léxico económico de Rajoy es ajeno a ambos discursos de Sánchez por igual.
+
+**Excepción notable: *«crecimiento»*:** el patrón es inverso al esperado. A vs. B (LL = 9.66) y A vs. C (LL = 25.27) indican que *«crecimiento»* es más frecuente en **Rajoy** que en Sánchez 2020, pero **menos** que en Sánchez 2023. Y B vs. C (LL = 5.64, LR = 2.88, p = 0.02) confirma que Sánchez 2023 usa *«crecimiento»* significativamente más que Sánchez 2020. Esto sugiere un desplazamiento discursivo entre los dos discursos de Sánchez: en 2023 recupera el marco del crecimiento económico que en 2020 había dejado en segundo plano.
+
+**Excepción notable: *«competitividad»*:** LL muy alto en A vs. C (24.92) frente a A vs. B (13.44), y B vs. C significativo (LL = 3.92, p = 0.05). *«Competitividad»* es más rajoyiana que sanchista, pero dentro de los discursos de Sánchez es más frecuente en 2023 que en 2020 → mismo patrón que *«crecimiento»*.
+
+---
+
+### Ventaja respecto a `keyness_table()`
+
+`keyness_pairs()` permite detectar dos fenómenos que una comparación binaria simple oculta:
+
+1. **Si una palabra es clave de un orador frente a todos los demás** o solo frente a uno concreto.
+2. **Si hay variación interna dentro de un mismo orador** a lo largo del tiempo, es decir, si el discurso de Sánchez en 2023 se ha acercado o alejado del léxico de Rajoy respecto a 2020.
+
+---
+
+### Referencia
+
+Rayson, P. & Garside, R. (2000). Comparing corpora using frequency profiling. *Proceedings of the ACL Workshop on Comparing Corpora*, 1–6.
+
+## Key key words: `key_keys()`
+
+> Una de las contribuciones más originales del paquete: implementa la idea de Mike Scott (1997) de **iterar el cálculo de keyness texto por texto** dentro del corpus foco para detectar si las palabras clave están impulsadas por unos pocos textos o son sistemáticas.
+
+```{r key-keys}
+# key_keys requiere DFMs target y reference por documento
+# Para Sánchez: dfm de cada uno de sus discursos vs. dfm Rajoy completo
+dfm_san_docs <- dfm_subset(dfm_corp,
+                            docvars(dfm_corp,"Orador") == "Sanchez")
+dfm_raj_total <- dfm(toks_raj)
+
+kk <- key_keys(dfm_san_docs, dfm_raj_total)
+
+# Las columnas pueden variar entre versiones del paquete; mostramos
+# las que existen y ordenamos por la primera columna numérica relevante
+cat("Columnas disponibles:", paste(names(kk), collapse=", "), "\n\n")
+
+kk |>
+  arrange(across(where(is.numeric), \(x) desc(x))) |>
+  head(15) |>
+  kt(caption = "Key key words de Sánchez vs. Rajoy", digits = 3)
+```
+
+> **Range = 2/2** indica que la palabra es clave en **ambos** discursos de Sánchez → es un rasgo estilístico sistemático, no un tema puntual de un discurso.
+
+## *Key key words* de Sánchez vs. Rajoy (`key_keys()`)
+
+> **Nota sobre `key_range`:** el valor 100 en todas las filas puede llamar la atención si se espera un recuento de documentos (1 o 2). La función `key_keys()` expresa el rango como **porcentaje**: 100 significa que la palabra es clave en el 100 % de los textos del corpus foco, es decir, en los dos discursos de Sánchez.
+
+### Qué es esta tabla y cómo leerla
+
+La tabla muestra los resultados de `key_keys()`, que implementa la idea de las ***key key words*** de Mike Scott (1997). La lógica es la siguiente: en lugar de calcular la *keyness* de Sánchez frente a Rajoy **una sola vez** sobre el corpus completo, el algoritmo **repite el cálculo texto a texto** dentro del corpus foco. En nuestro caso, calcula la keyness del discurso de Sánchez 2020 vs. Rajoy, y luego la del discurso de Sánchez 2023 vs. Rajoy, y finalmente resume los resultados en las columnas que ves.
+
+El objetivo es distinguir palabras clave **sistemáticas** (presentes en todos los discursos de Sánchez) de palabras clave **oportunistas** (que solo impulsan la keyness en un discurso concreto, quizá por un tema puntual).
+
+---
+
+### Las columnas
+
+**`token`** — La palabra analizada.
+
+**`key_range`** — Porcentaje de textos del corpus foco en los que esa palabra resulta ser clave. Con 2 discursos de Sánchez, solo hay dos valores posibles: 50 (clave en uno de los dos) o 100 (clave en ambos). Que todas las filas tengan 100 significa que estas palabras son **consistentemente clave en los dos discursos**, no solo en uno. Es el filtro más importante: `key_range = 100` indica un rasgo estilístico del orador, no un tema puntual de un discurso concreto.
+
+**`key_mean`** — Media del valor de log-likelihood (LL) de esa palabra a lo largo de los textos del foco. Cuanto más alto, más fuerte es la diferencia de frecuencia con Rajoy de media. *«Vamos»* (138.7) destaca muy por encima del resto.
+
+**`key_sd`** — Desviación típica del LL entre los textos del foco. Indica si la keyness es **estable** o **variable** entre discursos. Un `key_sd` bajo en relación a `key_mean` significa que la palabra es igual de característica en ambos discursos:
+
+- *«Transición»*: `key_mean = 16.1`, `key_sd = 0.6` → keyness casi idéntica en 2020 y 2023.
+- *«Derecha»*: `key_mean = 31.6`, `key_sd = 19.7` → mucho más presente en uno de los dos discursos.
+
+**`effect_mean`** — Media del tamaño del efecto (log-ratio o medida equivalente) a lo largo de los textos del foco. Complementa al LL: mientras `key_mean` mide la **significación estadística**, `effect_mean` mide la **magnitud real** de la diferencia. *«Progresista»* tiene un `key_mean` más bajo que *«vamos»* pero un `effect_mean` más alto (5.99 vs. 4.49), lo que significa que aunque aparece menos veces en términos absolutos, cuando aparece la diferencia con Rajoy es proporcionalmente mayor.
+
+---
+
+### Interpretación lingüística
+
+La tabla revela el **campo léxico ideológico** de Sánchez. Las palabras con `key_range = 100`, `key_mean` alto y `key_sd` bajo son las más diagnósticas de su estilo discursivo estable:
+
+- **Marcadores de posición política:** *progresista*, *derecha*, *derechas*, *género*, *mujeres*, *pobreza* → vocabulario del discurso de izquierda progresista.
+- **Marcadores de urgencia y apelación directa:** *vamos*, *pido*, *calles* → estilo más apelativo y movilizador que el de Rajoy.
+- **Marco temporal:** *transición* → referencia a un momento de cambio histórico.
+- **Ámbitos de política social:** *salud*, *pobreza*, *mujeres*, *género* → agenda social explícita.
+
+La diferencia entre *«vamos»* y el resto es llamativa: con `key_mean = 138.7` (más del triple que el siguiente) es con diferencia la palabra más significativa estadísticamente, pero su `effect_mean = 4.49` es moderado comparado con *«progresista»* (5.99). Esto sugiere que *«vamos»* es muy frecuente en Sánchez (alta frecuencia absoluta → LL alto), mientras que *«progresista»* es proporcionalmente más exclusivo de su discurso (alta rareza en Rajoy → log-ratio alto).
+
+---
+
+### Referencia
+
+Scott, M. (1997). PC analysis of key words — and key key words. *System*, 25(2), 233–245.
+
+## Colocaciones por Mutual Information: `collocates_by_MI()`
+
+> Calcula MI para todos los colocados de una palabra en una ventana asimétrica (`left`, `right`).
+
+```{r collocates-mi}
+col_espana <- collocates_by_MI(toks, "españa", left = 5, right = 5)
+
+# Imprimir columnas reales para inspección
+cat("Columnas devueltas por collocates_by_MI:",
+    paste(names(col_espana), collapse=", "), "\n\n")
+
+# Detectar columnas por patrón en el nombre (case-insensitive)
+nm <- names(col_espana)
+freq_col <- nm[grepl("freq|count|co.?occ", nm, ignore.case=TRUE)][1]
+mi_col   <- nm[grepl("mi|mutual", nm, ignore.case=TRUE)][1]
+tok_col  <- nm[grepl("token|feature|word|collo", nm, ignore.case=TRUE)][1]
+
+# Fallback: si no se detectan, usar la primera columna texto y la primera numérica
+if (is.na(tok_col))
+  tok_col <- nm[sapply(col_espana, is.character)][1]
+if (is.na(freq_col) || is.na(mi_col)) {
+  num_cols <- nm[sapply(col_espana, is.numeric)]
+  if (is.na(freq_col)) freq_col <- num_cols[1]
+  if (is.na(mi_col))   mi_col   <- num_cols[length(num_cols)]
+}
+
+cat("Usando: token =", tok_col, "· freq =", freq_col, "· MI =", mi_col, "\n\n")
+
+# Top 15 colocados ordenados por la métrica de asociación
+col_espana |>
+  filter(.data[[freq_col]] >= 3) |>
+  arrange(desc(.data[[mi_col]])) |>
+  head(15) |>
+  kt(caption = paste0('Top 15 colocados de "españa" ordenados por ', mi_col, ' (ventana +-5)'),
+      digits = 3)
+```
+
+```{r collocates-grafico, fig.height=4.5, fig.width=6.5}
+# Gráfico de los colocados: MI vs. frecuencia de co-ocurrencia
+col_espana |>
+  filter(.data[[freq_col]] >= 3) |>
+  arrange(desc(.data[[mi_col]])) |>
+  head(25) |>
+  ggplot(aes(x = .data[[freq_col]], y = .data[[mi_col]],
+             label = .data[[tok_col]])) +
+  geom_point(color = "#1D3557", size = 3, alpha = 0.7) +
+  geom_text_repel(size = 3, max.overlaps = 25) +
+  scale_x_log10() +
+  labs(title = 'Colocados de "españa" por MI y frecuencia',
+       subtitle = "Eje X: co-ocurrencias (log) · Eje Y: información mutua",
+       x = "Co-ocurrencias", y = "Mutual Information")
+```
+
+## Colocados de *españa* por PMI (ventana ±5)
+
+La tabla muestra las **colocaciones más fuertes** de la palabra *españa* en el corpus de Sánchez, calculadas mediante **Pointwise Mutual Information (PMI)**. Una colocación es una pareja de palabras que aparecen juntas con más frecuencia de la que cabría esperar por puro azar.
+
+### Las columnas
+
+**`token`** — La palabra colocada (el *colocado*), es decir, la palabra que aparece cerca de *españa* dentro de una ventana de ±5 palabras.
+
+**`col_freq`** — Número de veces que ese colocado aparece **dentro de la ventana de ±5 palabras alrededor de *españa***. Es la frecuencia de co-ocurrencia.
+
+**`total_freq`** — Número de veces que ese colocado aparece **en todo el corpus**, independientemente de su posición. Es su frecuencia bruta global.
+
+**`PMI`** — Pointwise Mutual Information. Mide cuánto más frecuente es la co-ocurrencia observada respecto a lo que se esperaría si las dos palabras fueran independientes entre sí:
+
+$$PMI = \log_2 \frac{P(\text{españa}, \text{colocado})}{P(\text{españa}) \times P(\text{colocado})}$$
+
+Un PMI alto significa que las dos palabras **se atraen mutuamente**: aparecen juntas mucho más de lo que su frecuencia individual predice. PMI = 0 significa independencia; PMI negativo significa que se evitan.
+
+---
+
+### Por qué `col_freq` puede ser mayor que `total_freq`
+
+Este es el dato más contraintuitivo de la tabla. Por ejemplo, *descentralizada* tiene `col_freq = 4` pero `total_freq = 1`. ¿Cómo puede aparecer 4 veces cerca de *españa* si en total solo aparece 1 vez en el corpus?
+
+La explicación está en cómo funciona la **ventana deslizante**: cada ocurrencia de *españa* abre una ventana de ±5 palabras, y si *españa* aparece varias veces seguidas o en párrafos cortos, la misma ocurrencia de *descentralizada* puede **quedar dentro de varias ventanas a la vez** y contarse múltiples veces. En otras palabras, `col_freq` cuenta pares de co-ocurrencia, no ocurrencias únicas del colocado. Cuando `col_freq > total_freq`, significa que esa palabra aparece una sola vez en el corpus pero siempre en un contexto muy denso de menciones a *españa*.
+
+---
+
+### Interpretación lingüística
+
+Los colocados revelan el **frame conceptual** con el que Sánchez construye discursivamente *españa*:
+
+**España como proyecto político pluralista:** *descentralizada*, *federal*, *diversa* → Sánchez encuadra España como un estado que debe reconocer su diversidad territorial e identitaria. El colocado *federal* con `col_freq = 11` es el más frecuente de la tabla y tiene PMI alto, lo que indica que no es casual sino un patrón retórico consistente.
+
+**España como sujeto con agencia narrativa:** *retrocede*, *atravesado*, *admite*, *gobernado*, *recurrir* → España se presenta como actor de una historia con obstáculos y decisiones, no como una entidad abstracta.
+
+**España como ideal normativo:** *unida*, *próspera*, *próxima* → adjetivos valorativos que proyectan un horizonte deseable, típicos del discurso programático de investidura.
+
+**Framing de crisis y urgencia:** *bloqueos*, *disyuntiva* → contextualizan a España en una situación de tensión que requiere resolución, lo que legitima el discurso de cambio.
+
+---
+
+### Por qué PMI y no frecuencia bruta
+
+Si ordenásemos por `col_freq`, *federal* encabezaría la lista. PMI invierte parcialmente ese ranking porque **penaliza las palabras frecuentes**: una palabra que aparece muchas veces en el corpus tiene más probabilidades de aparecer cerca de *españa* por azar, así que necesita más co-ocurrencias para obtener un PMI alto. Por eso *descentralizada* (total_freq = 1) supera a *federal* (total_freq = 4): su co-ocurrencia con *españa* es casi perfecta en proporción a su frecuencia global, lo que indica una atracción léxica extremadamente fuerte.
+
+La contrapartida conocida del PMI es precisamente esta: **sobrevalora palabras raras**. Una palabra que aparece una sola vez, y esa vez es junto a *españa*, obtiene un PMI máximo aunque la evidencia sea mínima. Por eso en la práctica se aplica un filtro de `col_freq >= 3` antes de interpretar los resultados, como hace esta tabla.
+
+## Red colocacional: `col_network()`
+
+> Genera un grafo `tidygraph` que conecta los colocados más fuertes de varios nodos. Implementa el método de Brezina, McEnery & Wattam (2015).
+
+```{r col-network, fig.height=5, fig.width=6.5}
+# Calcular colocados de varias palabras clave; reusamos freq_col detectado
+col_cambio  <- collocates_by_MI(toks, "cambio",  5, 5)
+col_reforma <- collocates_by_MI(toks, "reforma", 5, 5)
+col_dialogo <- collocates_by_MI(toks, "diálogo", 5, 5)
+
+# Filtrar por la columna de frecuencia que exista
+col_cambio  <- col_cambio  |> filter(.data[[freq_col]] >= 3)
+col_reforma <- col_reforma |> filter(.data[[freq_col]] >= 3)
+col_dialogo <- col_dialogo |> filter(.data[[freq_col]] >= 3)
+
+# Crear el objeto tidygraph
+
+  library(ggraph)
+  library(tidygraph)
+  net <- col_network(col_cambio, col_reforma, col_dialogo)
+  ggraph(net, weight = link_weight, layout = "stress") + 
+  geom_edge_link(color = "gray80", alpha = .75) + 
+  geom_node_point(aes(alpha = node_weight, size = 3, color = n_intersects)) +
+  geom_node_text(aes(label = label), repel = T, size = 3) +
+  scale_alpha(range = c(0.2, 0.9)) +
+  theme_graph() +
+  theme(legend.position="none")
+
+
+```
+
+## Resumen de funciones aplicadas
+
+| Función | Qué hace | Aplicada a |
+|---|---|---|
+| `preprocess_text()` | Limpieza estandarizada | Los 5 textos |
+| `frequency_table()` | Frec. abs. + rel. + ARF + DP | Corpus completo |
+| `dispersions_all()` | Dispersión global | Todos los tokens |
+| `dispersions_token()` | >10 medidas detalladas | "españa" |
+| `keyness_table()` | LL + LR + p + frec. + DP | Sánchez vs. Rajoy |
+| `keyness_pairs()` | Comparación 3+ corpus | 3 discursos |
+| `key_keys()` | Keyness texto a texto | Sánchez vs. Rajoy |
+| `collocates_by_MI()` | MI por nodo | "españa" |
+| `col_network()` | Red colocacional | "cambio", "reforma", "diálogo" |
+
+## Bibliografía
+
+- Brezina, V., McEnery, T., & Wattam, S. (2015). Collocations in context: A new perspective on collocation networks. *International Journal of Corpus Linguistics*, 20(2), 139–173.
+- Gries, S. T. (2008). Dispersions and adjusted frequencies in corpora. *International Journal of Corpus Linguistics*, 13(4), 403–437.
+- Hardie, A. (2014). Log ratio: An informal introduction. CASS, Lancaster University.
+- Rayson, P. & Garside, R. (2000). Comparing corpora using frequency profiling. *ACL Workshop*.
+- Scott, M. (1997). PC analysis of key words—and key key words. *System*, 25(2), 233–245.
+
+```{r session-info, echo=FALSE, results="asis"}
+cat("\\vspace{1em}\\noindent\\small\\textit{Análisis generado el",
+    format(Sys.time(), "%d/%m/%Y"),
+    "con R", paste(R.version$major, R.version$minor, sep="."),
+    "y quanteda", as.character(packageVersion("quanteda")), ".}\n")
+```
