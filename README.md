@@ -3,6 +3,9 @@
 
 ![Descripción](imgs/corpus_stats_course_banner.svg)
 
+Profesor: Adrián Cabedo Nebot (adrian.cabedo@uv.es)
+Catedrático de Lengua Española
+
 Materiales para la sesión de formación (2 h) impartida en la **Universidad de Navarra**.
 
 Los ejemplos parten de los **discursos de investidura de Rajoy (2011, 2016a, 2016b) y Sánchez (2020, 2023)** como corpus de trabajo para ilustrar los conceptos estadísticos más habituales en lingüística de corpus.
