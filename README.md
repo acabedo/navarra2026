@@ -79,7 +79,8 @@ Los textos analizados son los discursos de investidura pronunciados en el Congre
 | Orador | Año  | Resultado       |
 |--------|------|-----------------|
 | Rajoy  | 2011 | Investido       |
-| Rajoy  | 2016 | Investido       |
+| Rajoy  | 2016a | No Investido       |
+| Rajoy  | 2016b | Investido       |
 | Sánchez| 2020 | Investido       |
 | Sánchez| 2023 | Investido       |
 
