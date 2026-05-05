@@ -1,7 +1,7 @@
 
 # Estadística para la lingüística de corpus
 
-![Descripción](img/corpus_stats_course_banner.svg)
+![Descripción](imgs/corpus_stats_course_banner.svg)
 
 Materiales para la sesión de formación (2 h) impartida en la **Universidad de Navarra**.
 
